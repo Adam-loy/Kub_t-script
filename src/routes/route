@@ -1,0 +1,287 @@
+
+import mapView from '../controllers/map-view/visualization-map';
+import { APIHandler } from './handler/api.handler';
+
+MapView  routes
+router.get("/healthz", mapView.routeHealthCheck);
+router.get("/status", mapView.routeStatus);
+router.get("/namespace", mapView.routeGetNamespaces);
+router.get("/scrape/:ns", mapView.routeScrapeData); // here we have pb
+router.get("/config", mapView.routeConfig);
+
+// K8s Dashboard Default
+/**
+ * AppDeployment
+ */
+
+router.post("/v1/appdeployment",);
+router.get("/v1/appdeployment/protocols",);
+router.post("/v1/appdeployment/validate/imagereference",);
+router.post("/v1/appdeployment/validate/name",);
+router.post("/v1/appdeployment/validate/protocol",);
+router.post("/v1/appdeploymentfromfile",);
+
+/**
+ * Clusterrole
+ */
+
+router.get("/v1/clusterrole",APIHandler.handleGetClusterRoleList);
+router.get("/v1/clusterrole/:name",);
+router.get("/v1/clusterrolebinding",);
+router.get("/v1/clusterrolebinding/:name",);
+
+/**
+ * ConfigMap
+ */
+
+router.get("/v1/configmap",);
+router.get("/v1/configmap/:namespace",);
+router.get("/v1/configmap/:namespace/:configmap",);
+
+/**
+ * Crd
+ */
+
+router.get("/v1/crd",);
+router.get("/v1/crd/:crd",);
+router.get("/v1/crd/:namespace/:crd/object",);
+router.get("/v1/crd/:namespace/:crd/:object",);
+router.get("/v1/crd/:namespace/:crd/:object/event",);
+
+/**
+ * Cronjob
+ */
+
+router.get("/v1/cronjob",);
+router.get("/v1/cronjob/:namespace",);
+router.get("/v1/cronjob/:namespace/:name",);
+router.get("/v1/cronjob/:namespace/:name/event",);
+router.get("/v1/cronjob/:namespace/:name/job",);
+router.put("/v1/cronjob/:namespace/:name/trigger",);
+
+
+router.get("/v1/csrftoken/:action",);
+
+/**
+ * DaemonSet
+ */
+
+router.get("/v1/daemonset",);
+router.get("/v1/daemonset/:namespace",);
+router.get("/v1/daemonset/:namespace/:daemonSet",);
+router.get("/v1/daemonset/:namespace/:daemonSet/event",);
+router.get("/v1/daemonset/:namespace/:daemonSet/pod",);
+router.get("/v1/daemonset/:namespace/:daemonSet/service",);
+
+/**
+ * Deployment
+ */
+
+router.get("/v1/deployment",);
+router.get("/v1/deployment/:namespace",);
+router.get("/v1/deployment/:namespace/:deployment",);
+router.get("/v1/deployment/:namespace/:deployment/event",);
+router.get("/v1/deployment/:namespace/:deployment/newreplicaset",);
+router.get("/v1/deployment/:namespace/:deployment/oldreplicaset",);
+router.put("/v1/deployment/:namespace/:deployment/pause",);
+router.put("/v1/deployment/:namespace/:deployment/restart",);
+router.put("/v1/deployment/:namespace/:deployment/resume",);
+router.put("/v1/deployment/:namespace/:deployment/rollback",);
+
+/**
+ * Event
+ */
+
+router.get("/v1/event",)
+router.get("/v1/event/:namespace",)
+
+/**
+ * HorizontalpodAutoScaler
+ */
+
+router.get("/v1/horizontalpodautoscaler",)
+router.get("/v1/horizontalpodautoscaler/:namespace",)
+router.get("/v1/horizontalpodautoscaler/:namespace/:horizontalpodautoscaler",)
+
+/**
+ * Ingress
+ */
+
+router.get("/v1/ingress",)
+router.get("/v1/ingress/:namespace",)
+router.get("/v1/ingress/:namespace/:ingress/event",)
+router.get("/v1/ingress/:namespace/:name",)
+router.get("/v1/ingressclass",)
+router.get("/v1/ingressclass/:ingressclass",)
+router.get("/v1/integration/:name/state",)
+
+/**
+ * Job
+ */
+
+router.get("/v1/job",)
+router.get("/v1/job/:namespace",)
+router.get("/v1/job/:namespace/:name",)
+router.get("/v1/job/:namespace/:name/event",)
+router.get("/v1/job/:namespace/:name/pod",)
+
+/**
+ * Log
+ */
+
+router.get("/log/file/:namespace/:pod/:container",)
+router.get("/log/file/:namespace/:resourceName/:resourceType",)
+router.get("/log/:namespace/:pod/",)
+router.get("/log/:namespace/:pod/:container",)
+
+/**
+ * Namespace
+ */
+
+router.get("/v1/namespace",)
+router.post("/v1/namespace",)
+router.get("/v1/namespace/:name",)
+router.get("/v1/namespace/:name/event",)
+
+/**
+ * NetworkPolicy
+ */
+
+router.get("/v1/networkpolicy")
+router.get("/v1/networkpolicy/:namespace")
+router.get("/v1/networkpolicy/:namespace/:networkpolicy")
+
+/**
+ * Node
+ */
+
+router.get("/v1/node",)
+router.get("/v1/node/:name",)
+router.put("/v1/node/:name/drain",)
+router.get("/v1/node/:name/event",)
+router.get("/v1/node/:name/pod",)
+
+/**
+ * PersistentVolume
+ */
+
+router.get("/v1/persistentvolume",)
+router.get("/v1/persistentvolume/namespace/:namespace/name/:persistentvolume",)
+router.get("/v1/persistentvolume/:persistentvolume",)
+router.get("/v1/persistentvolumeclaim",)
+router.get("/v1/persistentvolumeclaim/namespace",)
+router.get("/v1/persistentvolumeclaim/namespace/name",)
+
+/**
+ * Pod
+ */
+
+router.get("/v1/pod",)
+router.get("/v1/pod/:namespace",)
+router.get("/v1/pod/:namespace/:pod",)
+router.get("/v1/pod/:namespace/:pod/container",)
+router.get("/v1/pod/:namespace/:pod/event",)
+router.get("/v1/pod/:namespace/:pod/persistentvolumeclaim",)
+router.get("/v1/pod/:namespace/:pod/shell/:container",)
+
+/**
+ * ReplicaSet
+ */
+
+router.get("/v1/replicaset")
+router.get("/v1/replicaset/:namespace")
+router.get("/v1/replicaset/:namespace/:replicaSet")
+router.get("/v1/replicaset/:namespace/:replicaSet/event")
+router.get("/v1/replicaset/:namespace/:replicaSet/pod")
+router.get("/v1/replicaset/:namespace/:replicaSet/service")
+
+/**
+ * ReplicationController
+ */
+
+router.get("/v1/replicationcontroller",)
+router.get("/v1/replicationcontroller/:namespace",)
+router.get("/v1/replicationcontroller/:namespace/:replicationController",)
+router.get("/v1/replicationcontroller/:namespace/:replicationController/event",)
+router.get("/v1/replicationcontroller/:namespace/:replicationController/pod",)
+router.get("/v1/replicationcontroller/:namespace/:replicationController/service",)
+router.post("/v1/replicationcontroller/:namespace/:replicationController/update/pod",)
+
+/**
+ * Role
+ */
+
+router.get("/v1/role",)
+router.get("/v1/role/:namespace",)
+router.get("/v1/role/:namespace/name",)
+
+/**
+ * RoleBinding
+ */
+
+router.get("/v1/rolebinding",)
+router.get("/v1/rolebinding/:namespace",)
+router.get("/v1/rolebinding/:namespace/:name",)
+
+/**
+ * Scale
+ */
+
+router.get("/v1/scale/:kind/:namespace/:name",)
+router.put("/v1/scale/:kind/:namespace/:name",)
+router.get("/v1/scale/:kind/:name",)
+router.put("/v1/scale/:kind/:name",)
+
+/**
+ * Secret
+ */
+
+router.get("/v1/secret",)
+router.post("/v1/secret",)
+router.get("/v1/secret/:namespace",)
+router.get("/v1/secret/:namespace/:name",)
+
+/**
+ * Service
+ */
+
+router.get("/v1/service",)
+router.get("/v1/service/:namespace",)
+router.get("/v1/service/:namespace/:service",)
+router.get("/v1/service/:namespace/:service/event",)
+router.get("/v1/service/:namespace/:service/ingress",)
+router.get("/v1/service/:namespace/:service/pod",)
+
+/**
+ * ServiceAccount
+ */
+
+router.get("/v1/serviceaccount",)
+router.get("/v1/serviceaccount/:namespace",)
+router.get("/v1/serviceaccount/:namespace/:serviceaccount",)
+router.get("/v1/serviceaccount/:namespace/:serviceaccount/imagepullsecret",)
+router.get("/v1/serviceaccount/:namespace/:serviceaccount/secret",)
+
+/**
+ * StatefulSet
+ */
+
+router.get("/v1/statefulset",)
+router.get("/v1/statefulset/:namespace",)
+router.get("/v1/statefulset/:namespace/:statefulset",)
+router.get("/v1/statefulset/:namespace/:statefulset/event",)
+router.get("/v1/statefulset/:namespace/:statefulset/pod",)
+
+/**
+ * StorageClass
+ */
+
+router.get("/v1/storageclass",)
+router.get("/v1/storageclass/:storageclass",)
+router.get("/v1/storageclass/:storageclass/persistentvolume",)
+
+router.get("/v1/:kind/:namespace/:name/horizontalpodautoscaler")
+
+
+
+module.exports = router;

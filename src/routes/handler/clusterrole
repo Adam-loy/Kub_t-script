@@ -1,0 +1,39 @@
+  /* public async handleGetClusterRoleDetail(req: Request, res: Response): Promise<void> {
+        try {
+            const name = req.params.name;
+            const result = await V1ClusterRole.getClusterRoleDetail(this.k8sClient, name);
+            res.status(200).json(result);
+        } catch (error) {
+            this.handleInternalError(res, error);
+        }
+    }
+
+    public async handleGetClusterRoleBindingList(req: Request, res: Response): Promise<void> {
+        try {
+            const dataSelect = this.parseDataSelectPathParameter(req);
+            const result = await ClusterRoleBinding.getClusterRoleBindingList(this.k8sClient, dataSelect);
+            res.status(200).json(result);
+        } catch (error) {
+            this.handleInternalError(res, error);
+        }
+    }
+
+    public async handleGetClusterRoleBindingDetail(req: Request, res: Response): Promise<void> {
+        try {
+            const name = req.params.name;
+            const result = await ClusterRoleBinding.getClusterRoleBindingDetail(this.k8sClient, name);
+            res.status(200).json(result);
+        } catch (error) {
+            this.handleInternalError(res, error);
+        }
+    }
+
+    private parseDataSelectPathParameter(req: Request): any {
+        // Implement the parsing logic here
+        return {};
+    }
+
+    private handleInternalError(res: Response, error: any): void {
+        res.status(500).json({ error: error.message });
+    }
+}*/
