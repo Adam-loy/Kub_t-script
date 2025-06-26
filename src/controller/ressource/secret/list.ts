@@ -25,7 +25,8 @@ export function GetSecretList(listNamespacedSecret: k8s.V1SecretList): SecretLis
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedSecret.kind || '',
+                apiVersion: item.apiVersion || 'v1',
+                kind: item.kind || 'Secret',
                 scalable: false,
                 restartable: false,
             }

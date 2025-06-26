@@ -23,7 +23,8 @@ export function GetNetworkPolicyList(listNamespacedNetworkPolicy: k8s.V1NetworkP
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedNetworkPolicy.kind || '',
+                apiVersion: item.apiVersion ||  'networking.k8s.io/v1',
+                kind: item.kind || 'NetworkPolicy',
                 scalable: false,
                 restartable: false,
             }

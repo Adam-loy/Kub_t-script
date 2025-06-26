@@ -49,7 +49,8 @@ export function GetJobList(listNamespacedJob: k8s.V1JobList): JobList {
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedJob.kind || '',
+                apiVersion: item.apiVersion || 'batch/v1',
+                kind: item.kind || 'Job',
                 scalable: false,
                 restartable: false,
             },

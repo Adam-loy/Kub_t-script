@@ -26,6 +26,14 @@ export function GetServiceList(listNamespacedService: k8s.V1ServiceList): Servic
                   protocol: p.protocol || '',
                   nodePort: p.nodePort,
                 })),
+              objectMeta: {
+                name: ''
+              },
+              typeMeta: {
+                kind: '',
+                scalable: false,
+                restartable: false
+              }
               });
             });
           }
@@ -42,19 +50,35 @@ export function GetServiceList(listNamespacedService: k8s.V1ServiceList): Servic
                 protocol: p.protocol || '',
                 nodePort: p.nodePort,
               })),
+              objectMeta: {
+                name: ''
+              },
+              typeMeta: {
+                kind: '',
+                scalable: false,
+                restartable: false
+              }
             });
           }
         services.push({
             internalEndpoint: {
-                host: item.spec?.clusterIP || '',
-                nodeName: item.spec?.externalName,
-                ready: item.status?.loadBalancer?.ingress?.length! > 0 || false,
-                ports: (item.spec?.ports || []).map(p => ({
-                    port: p.port || 0,
-                    name: p.name || '',
-                    protocol: p.protocol || '',
-                    nodePort: p.nodePort
-                })) 
+              host: item.spec?.clusterIP || '',
+              nodeName: item.spec?.externalName,
+              ready: item.status?.loadBalancer?.ingress?.length! > 0 || false,
+              ports: (item.spec?.ports || []).map(p => ({
+                port: p.port || 0,
+                name: p.name || '',
+                protocol: p.protocol || '',
+                nodePort: p.nodePort
+              })),
+              objectMeta: {
+                name: ''
+              },
+              typeMeta: {
+                kind: '',
+                scalable: false,
+                restartable: false
+              }
             },
             externalEndpoints: externalEndpoints,
             selector: item.spec?.selector || {},
@@ -70,7 +94,8 @@ export function GetServiceList(listNamespacedService: k8s.V1ServiceList): Servic
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedService.kind || '',
+                apiVersion: item.apiVersion || 'v1',
+                kind: item.kind || 'Service',
                 scalable: false,
                 restartable: false,
             }

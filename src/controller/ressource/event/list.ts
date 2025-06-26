@@ -34,7 +34,8 @@ export function GetEventList(listNamespacedEvent: k8s.CoreV1EventList): EventLis
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedEvent.kind || '',
+                apiVersion: item.apiVersion || 'events.k8s.io/v1',
+                kind: item.kind || 'EventList',
                 scalable: false,
                 restartable: false,
             }

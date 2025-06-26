@@ -6,28 +6,43 @@ import { APIHandler } from './handler/api.handler.js';
 export const router = express.Router();
 
 
+
+
+router.get("/v1/_raw/:kind/name/:name",APIHandler.handleGetResource);
+router.put("/v1/_raw/:kind/name/:name",APIHandler.handlePutResource);
+router.delete("/v1/_raw/:kind/name/:name",APIHandler.handleDeleteResource);
+router.get("/v1/_raw/:kind/namespace/:namespace/name/:name",APIHandler.handleGetResource);
+router.put("/v1/_raw/:kind/namespace/:namespace/name/:name",APIHandler.handlePutResource);
+router.delete("/v1/_raw/:kind/namespace/:namespace/name/:name",APIHandler.handleDeleteResource);
+
+
+/**
+ * Quoatas
+ */
+router.get("/v1/resourcequotas/:namespace",APIHandler.handleCreateQuotas);
+router.get("/v1/resourcequotas",APIHandler.handleresourceQuotas);
+
+
 // mapViewer
 router.get("/v1/scrape/:namespace",APIHandler.handleGetScrap);
 
 
-//router.get("/v1/clusterrole",APIHandler.handleGetClusterRoleList);
   
 /**
  * AppDeployment
  */
 
-// router.post("/v1/appdeployment",);
-// router.get("/v1/appdeployment/protocols",);
-// router.post("/v1/appdeployment/validate/imagereference",);
-// router.post("/v1/appdeployment/validate/name",);
-// router.post("/v1/appdeployment/validate/protocol",);
-// router.post("/v1/appdeploymentfromfile",);
+router.post("/v1/appdeployment",APIHandler.handleDeploy);
+router.get("/v1/appdeployment/protocols",APIHandler.handleNameValidity);
+router.post("/v1/appdeployment/validate/imagereference",APIHandler.handleImageReferenceValidity);
+router.post("/v1/appdeployment/validate/name",APIHandler.handleProtocolValidity);
+router.post("/v1/appdeployment/validate/protocol",APIHandler.handleGetAvailableProtocols);
+router.post("/v1/appdeploymentfromfile",APIHandler.handleDeployFromFile);
 
 
 /**
  * Clusterrole
  */
-
 router.get("/v1/clusterrole",APIHandler.handleGetClusterRoleList);
 router.get("/v1/clusterrole/:name",APIHandler.handleGetClusterRoleDetail);
 
@@ -99,6 +114,14 @@ router.get("/v1/deployment/:namespace/:deployment/oldreplicaset",APIHandler.hand
 
 
 /**
+ * Endpoint
+ */
+
+router.get("/v1/endpoint", APIHandler.handleGetEndpointList);
+router.get("/v1/endpoint/:namespace", APIHandler.handleGetEndpointList);
+
+
+/**
  * Event
  */
 
@@ -109,7 +132,6 @@ router.get("/v1/event/:namespace", APIHandler.handleGetEventList);
 /**
  * HorizontalpodAutoScaler
  */
-
 router.get("/v1/horizontalpodautoscaler",APIHandler.handleGetHorizontalPodAutoscalerList)
 router.get("/v1/horizontalpodautoscaler/:namespace",APIHandler.handleGetHorizontalPodAutoscalerList)
 router.get("/v1/horizontalpodautoscaler/:namespace/:horizontalpodautoscaler",APIHandler.handleGetHorizontalPodAutoscalerDetail)
@@ -148,10 +170,11 @@ router.get("/v1/job/:namespace/:name/pod",APIHandler.handleGetJobPods)
  * Log
  */
 
-// router.get("/log/file/:namespace/:pod/:container",) log.stream
-// router.get("/log/file/:namespace/:resourceName/:resourceType",)
-router.get("/log/:namespace/:pod/",APIHandler.handleLogs)
-router.get("/log/:namespace/:pod/:container",APIHandler.handleLogs)
+router.get("/v1/log/source/:namespace/:resourceName/:resourceType",APIHandler.handleLogSource)
+// router.get("/v1/log/:namespace/:pod/",APIHandler.handleLogs)
+router.get("/v1/log/:namespace/:podName/:container",APIHandler.handleLogs)
+router.get("/v1/log/file/:namespace/:podName/:container",APIHandler.handleLogFile) 
+
 
 /**
  * Namespace
@@ -206,7 +229,7 @@ router.get("/v1/pod/:namespace/:pod",APIHandler.handleGetPodDetail);
 router.get("/v1/pod/:namespace/:pod/container",APIHandler.handleGetPodContainers);
 router.get("/v1/pod/:namespace/:pod/event",APIHandler.handleGetPodEvents)
 router.get("/v1/pod/:namespace/:pod/persistentvolumeclaim",APIHandler.handleGetPodPersistentVolumeClaims)
-// router.get("/v1/pod/:namespace/:pod/shell/:container",)
+router.get("/v1/pod/:namespace/:pod/shell/:container",APIHandler.handleExecShell)
 
 /**
  * ReplicaSet
@@ -255,7 +278,7 @@ router.get("/v1/rolebinding/:namespace/:name",APIHandler.handleGetRoleBindingDet
  */
 
 router.get("/v1/scale/:kind/:namespace/:name",APIHandler.handleGetReplicaCount)
-// router.put("/v1/scale/:kind/:namespace/:name",)
+router.put("/v1/scale/:kind/:namespace/:name",APIHandler.handleScaleResource)
 router.get("/v1/scale/:kind/:name",APIHandler.handleGetReplicaCount)
 // router.put("/v1/scale/:kind/:name",)
 
@@ -308,7 +331,5 @@ router.get("/v1/statefulset/:namespace/:statefulset/pod",APIHandler.handleGetSta
 router.get("/v1/storageclass",APIHandler.handleGetStorageClassList)
 router.get("/v1/storageclass/:storageclass",APIHandler.handleGetStorageClass)
 router.get("/v1/storageclass/:storageclass/persistentvolume",APIHandler.handleGetStorageClassPersistentVolumes)
-
-// router.get("/v1/:kind/:namespace/:name/horizontalpodautoscaler")
 
 

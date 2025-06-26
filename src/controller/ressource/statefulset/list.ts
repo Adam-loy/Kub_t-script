@@ -44,7 +44,8 @@ export function GetStatefulSetList(listNamespacedStatefulSet: k8s.V1StatefulSetL
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedStatefulSet.kind || '',
+                apiVersion: item.apiVersion || 'apps/v1',
+                kind: item.kind || 'StatefulSet',
                 scalable: true,
                 restartable: true,
             }

@@ -6,9 +6,10 @@ const kubeclient = new k8s.KubeConfig();
 kubeclient.loadFromDefault() ;// Will load your default kubeconfig (e.g., ~/.kube/config)
 
 
-export function GetPodList(listNamespacedPod: k8s.V1PodList): PodList {
+export  function GetPodList(Pods: k8s.PodStatus[]): PodList {
 
-    const att_totalItems = listNamespacedPod.items.length || 0
+    const att_totalItems = Pods.length || 0
+     
     
     const status: Status = {running: 0, failed: 0, pending: 0, succeeded: 0}
     const pods: Pod[] = []
@@ -22,8 +23,8 @@ export function GetPodList(listNamespacedPod: k8s.V1PodList): PodList {
         warnings: []
     };
 
-    listNamespacedPod.items.map(item => {
-        const phase = item.status?.phase || '';
+    Pods.map(item => {
+        const phase = item.Pod.status?.phase || '';
         if (phase === 'Running') {
             status.running += 1;
             podInfo.running += 1;
@@ -42,36 +43,41 @@ export function GetPodList(listNamespacedPod: k8s.V1PodList): PodList {
   
         // Restart count: sum all container and init container restart counts
         const restartCount = [
-            ...(item.status?.containerStatuses || []),
-            ...(item.status?.initContainerStatuses || [])
+            ...(item.Pod.status?.containerStatuses || []),
+            ...(item.Pod.status?.initContainerStatuses || [])
         ].reduce((acc, cs) => acc + (cs.restartCount || 0), 0);
 
         pods.push({
             status: phase,
-            podIP: item.status?.podIP,
+            podIP: item.Pod.status?.podIP,
             restartCount: restartCount,
-            qosClass: item.status?.qosClass,
+            qosClass: item.Pod.status?.qosClass,
             metrics: {
-                cpuUsage: 0,
-                memoryUsage: 0,
+                cpuUsage: Number(item.CPU.CurrentUsage),
+                cpuLimitTotal: Number(item.CPU.LimitTotal),
+                cpuRequestTotal: Number(item.CPU.RequestTotal),
+                memoryUsage: Number(item.Memory.CurrentUsage),
+                memoryRequestTotal: Number(item.Memory.RequestTotal),
+                memoryTotalRequest: Number(item.Memory.LimitTotal),
                 cpuUsageHistory: [{timestamp: new Date(), value: 0}],
                 memoryUsageHistory: [{timestamp: new Date(), value: 0}]
-            }, 
+            },
             warnings: [], 
-            nodeName: item.spec?.nodeName || '',
-            serviceAccountName: item.spec?.serviceAccountName ||'',
-            containerImages: item.spec?.containers?.map(c => c.image || '') || [],
+            nodeName: item.Pod.spec?.nodeName || '',
+            serviceAccountName: item.Pod.spec?.serviceAccountName ||'',
+            containerImages: item.Pod.spec?.containers?.map(c => c.image || '') || [],
             objectMeta: {
-                name: item.metadata?.name || '',
-                namespace: item.metadata?.namespace,
-                labels: item.metadata?.labels,
-                annotations: item.metadata?.annotations,
-                creationTimestamp: item.metadata?.creationTimestamp,
-                uid: item.metadata?.uid,
-                ownerReferences: item.metadata?.ownerReferences,
+                name: item.Pod.metadata?.name || '',
+                namespace: item.Pod.metadata?.namespace,
+                labels: item.Pod.metadata?.labels,
+                annotations: item.Pod.metadata?.annotations,
+                creationTimestamp: item.Pod.metadata?.creationTimestamp,
+                uid: item.Pod.metadata?.uid,
+                ownerReferences: item.Pod.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedPod.kind || '',
+                apiVersion: item.Pod.apiVersion || 'v1',
+                kind: item.Pod.kind || 'Pod',
                 scalable: false,
                 restartable: true,
             }

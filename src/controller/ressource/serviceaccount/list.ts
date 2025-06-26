@@ -23,7 +23,8 @@ export function GetServiceAccountList(listNamespacedServiceAccount: k8s.V1Servic
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedServiceAccount.kind || '',
+                apiVersion: item.apiVersion || 'v1',
+                kind: item.kind || 'ServiceAccount',
                 scalable: false,
                 restartable: false,
             }

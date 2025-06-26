@@ -44,9 +44,10 @@ export function GetReplicaSetList(listNamespacedReplicaSet: k8s.V1ReplicaSetList
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedReplicaSet.kind || '',
+                apiVersion:  item.apiVersion || 'apps/v1',
+                kind: item.kind ||'ReplicaSet',
                 scalable: true,
-                restartable: true,
+                restartable: false,
             }
         })
 

@@ -23,7 +23,8 @@ export function GetConfigMapList(listNamespacedConfigMap: k8s.V1ConfigMapList): 
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedConfigMap.kind || '',
+                apiVersion: item.apiVersion || 'v1',
+                kind: item.kind || 'ConfigMap',
                 scalable: false,
                 restartable: false,
             }

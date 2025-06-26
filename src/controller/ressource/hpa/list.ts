@@ -31,8 +31,9 @@ export function GetHorizontalPodAutoscalerList(listNamespacedHorizontalPodAutosc
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedHorizontalPodAutoscaler.kind || '',
-                scalable: true,
+                apiVersion: item.apiVersion || 'autoscaling/v2',
+                kind: item.apiVersion || 'HorizontalPodAutoscaler',
+                scalable: false,
                 restartable: false,
             }
         })

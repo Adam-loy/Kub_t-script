@@ -2,16 +2,11 @@ import { Request, response, Response } from 'express';
 import * as k8s from '@kubernetes/client-node'; 
 import { ResourceList, ObjectMeta, NamespaceList, Namespace, Resource } from '../../../model/typing/root.api';
 
-const kubeclient = new k8s.KubeConfig();
-kubeclient.loadFromDefault() ;// Will load your default kubeconfig (e.g., ~/.kube/config)
-
-// const items:Resource[]  = [];
-const namespaces: Namespace[] = [];
 
 export function GetNamespaceList(listNamespacedNamespace: k8s.V1NamespaceList): NamespaceList {
+    const namespaces: Namespace[] = [];
 
     const att_totalItems = listNamespacedNamespace.items.length || 0
-
     listNamespacedNamespace.items.forEach(item => {
         // Build the item object
     
@@ -28,7 +23,8 @@ export function GetNamespaceList(listNamespacedNamespace: k8s.V1NamespaceList): 
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedNamespace.kind || '',
+                apiVersion:  item.apiVersion || 'v1',
+                kind: item.kind || 'Namespace',
                 scalable: false,
                 restartable: false,
             }

@@ -23,7 +23,8 @@ export function GetClusterRoleList(listNamespacedClusterRole: k8s.V1ClusterRoleL
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedClusterRole.kind || '',
+                apiVersion: item.apiVersion || 'rbac.authorization.k8s.io/v1',
+                kind:  item.kind || 'ClusterRole',
                 scalable: false,
                 restartable: false,
             }

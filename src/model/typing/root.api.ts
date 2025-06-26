@@ -2,6 +2,7 @@ import { AppError, StringMap } from "./root.shared.js";
 import { PersistentVolumeSource } from "./volume.api.js";
 
 export interface TypeMeta {
+	apiVersion?: string,
 	kind: string;
 	scalable: boolean;
 	restartable: boolean;
@@ -282,13 +283,12 @@ export interface Port {
 	nodePort?: number;
 }
 
-export interface Endpoint {
+export interface Endpoint extends Resource{
 	host: string;
 	nodeName?: string;
+	ip?: string,
 	ports: Port[];
 	ready?: boolean;
-	typeMeta?: TypeMeta;
-	objectMeta?: ObjectMeta;
 }
 
 export interface Event extends Resource {
@@ -331,6 +331,7 @@ export interface Namespace extends Resource {
 }
 
 export interface Node extends Resource {
+	metrics: NodeMetrics;
 	ready: string;
 }
 
@@ -1003,11 +1004,34 @@ export interface CRDVersion {
 	storage: boolean;
 }
 
+export interface ContainerMetrics {
+	cpuUsage: number;
+	cpuRequestTotal: number;
+	cpuLimitTotal: number;
+	memoryUsage: number;
+	memoryRequestTotal: number;
+	memoryTotalRequest: number;
+}
+
 export interface PodMetrics {
 	cpuUsage: number;
+	cpuRequestTotal: number;
+	cpuLimitTotal: number;
 	memoryUsage: number;
+	memoryRequestTotal: number;
+	memoryTotalRequest: number;
 	cpuUsageHistory: MetricResult[];
 	memoryUsageHistory: MetricResult[];
+}
+
+export interface NodeMetrics {
+	cpuCapacity: number;
+	cpuRequestTotal: number;
+	cpuLimitTotal: number;
+	memoryCapacity: number;
+	memoryRequestTotal: number;
+	memoryTotalRequest: number;
+
 }
 
 export interface Status {

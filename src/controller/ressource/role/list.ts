@@ -23,7 +23,8 @@ export function GetRoleList(listNamespacedRole: k8s.V1RoleList): RoleList {
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedRole.kind || '',
+                apiVersion: listNamespacedRole.apiVersion || item.apiVersion || 'rbac.authorization.k8s.io/v1',
+                kind: listNamespacedRole.kind || item.kind || '',
                 scalable: false,
                 restartable: false,
             }

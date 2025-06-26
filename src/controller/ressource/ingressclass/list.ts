@@ -25,7 +25,8 @@ export function GetIngressClassList(listNamespacedIngressClass: k8s.V1IngressCla
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedIngressClass.kind || '',
+                apiVersion: item.apiVersion || 'networking.k8s.io/v1',
+                kind: item.kind || 'IngressClass',
                 scalable: false,
                 restartable: false,
             }

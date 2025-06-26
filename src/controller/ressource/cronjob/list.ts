@@ -32,7 +32,8 @@ export function GetCronJobList(listNamespacedCronJob: k8s.V1CronJobList): CronJo
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedCronJob.kind || '',
+                apiVersion: item.apiVersion || 'batch/v1',
+                kind: item.kind || 'CronJob',
                 scalable: false,
                 restartable: false,
             }

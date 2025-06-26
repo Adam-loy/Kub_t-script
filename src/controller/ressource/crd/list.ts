@@ -31,7 +31,8 @@ export function GetCustomeResourceDefenitionList(listNamespacedCustomeResourceDe
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedCustomeResourceDefenition.kind || '',
+                apiVersion: item.apiVersion || 'apiextensions.k8s.io/v1',
+                kind: item.kind || 'CustomResourceDefinition',
                 scalable: false,
                 restartable: false,
             }

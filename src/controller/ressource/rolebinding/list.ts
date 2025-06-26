@@ -24,7 +24,8 @@ export function GetRoleBindingList(listNamespacedRoleBinding: k8s.V1RoleBindingL
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedRoleBinding.kind || '',
+                apiVersion: item.apiVersion || 'rbac.authorization.k8s.io/v1',
+                kind: item.kind || 'RoleBinding',
                 scalable: false,
                 restartable: false,
             }

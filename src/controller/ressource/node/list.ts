@@ -2,31 +2,36 @@ import { Request, response, Response } from 'express';
 import * as k8s from '@kubernetes/client-node'; 
 import { ResourceList, ObjectMeta, NodeList, Node } from '../../../model/typing/root.api';
 
-const kubeclient = new k8s.KubeConfig();
-kubeclient.loadFromDefault() ;// Will load your default kubeconfig (e.g., ~/.kube/config)
+export function GetNodeList(Nodes: k8s.NodeStatus[]): NodeList {
 
-
-export function GetNodeList(listNamespacedNode: k8s.V1NodeList): NodeList {
-
-    const att_totalItems = listNamespacedNode.items.length || 0
+    const att_totalItems = Nodes.length || 0
     const nodes: Node[] = [];
-    listNamespacedNode.items.map(item => {
+    Nodes.map(item => {
 
-        const readyCondition = item.status?.conditions?.find(cond => cond.type === "Ready");
+        const readyCondition = item.Node.status?.conditions?.find(cond => cond.type === "Ready");
 
         nodes.push({
             ready: readyCondition?.status === 'True' ? 'True' : 'False',
+            metrics: {
+                cpuCapacity: Number(item.CPU.Capacity),
+                cpuLimitTotal: Number(item.CPU.LimitTotal),
+                cpuRequestTotal: Number(item.CPU.RequestTotal),
+                memoryCapacity: Number(item.Memory.Capacity),
+                memoryRequestTotal: Number(item.Memory.RequestTotal),
+                memoryTotalRequest: Number(item.Memory.LimitTotal),
+            },
             objectMeta: {
-                name: item.metadata?.name || '',
-                namespace: item.metadata?.namespace,
-                labels: item.metadata?.labels,
-                annotations: item.metadata?.annotations,
-                creationTimestamp: item.metadata?.creationTimestamp,
-                uid: item.metadata?.uid,
-                ownerReferences: item.metadata?.ownerReferences,
+                name: item.Node.metadata?.name || '',
+                namespace: item.Node.metadata?.namespace,
+                labels: item.Node.metadata?.labels,
+                annotations: item.Node.metadata?.annotations,
+                creationTimestamp: item.Node.metadata?.creationTimestamp,
+                uid: item.Node.metadata?.uid,
+                ownerReferences: item.Node.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedNode.kind || '',
+                apiVersion: item.Node.apiVersion || 'v1',
+                kind: item.Node.kind ||'Node',
                 scalable: false,
                 restartable: false,
             }

@@ -31,7 +31,8 @@ export function GetPersistentVolumeList(listNamespacedPersistentVolume: k8s.V1Pe
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedPersistentVolume.kind || '',
+                apiVersion: item.kind || 'v1', 
+                kind: item.kind || 'PersistentVolume',
                 scalable: false,
                 restartable: false,
             }

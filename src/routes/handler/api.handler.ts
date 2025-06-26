@@ -9,7 +9,7 @@ import { ScrapData } from '../../controller/map-view.controller.js';
 import { Config, args } from "../../config/web_config.js";
 import { getUserAgent, getVersion } from "../../config/web_env.js";
 import { SystemBanner, toSystemBannerSeverity } from '../../model/systembanner/systembanner.js';
-import { ObjectMeta, ResourceList, ErrStatus } from '../../model/typing/root.api.js';
+import { ObjectMeta, ResourceList, ErrStatus, AppDeploymentContentSpec, AppDeploymentContentResponse, PodList, PodDetail, PodContainerList } from '../../model/typing/root.api.js';
 import { GetCronJobList} from '../../controller/ressource/cronjob/list.js'
 import { GetDaemonSetList } from '../../controller/ressource/daemonset/list.js';
 import { GetPodList } from '../../controller/ressource/pod/list.js';
@@ -35,12 +35,56 @@ import { GetPersistentVolumeClaimList } from '../../controller/ressource/persist
 import { GetReplicationControllerList } from '../../controller/ressource/replicationcontroller/list.js';
 import { GetCustomeResourceDefenitionList } from '../../controller/ressource/crd/list.js';
 import { GetIngressClassList } from '../../controller/ressource/ingressclass/list.js';
+import * as fs from 'node:fs/promises'
+import * as yaml from 'js-yaml'
+import * as  stream from 'stream';
+import { formatRFC3339 } from 'date-fns';
+import { GetCronJobLogList } from '../../controller/ressource/cronjob/listlog.js';
+import { GetDaemonSetLogList } from '../../controller/ressource/daemonset/listlog.js';
+import { GetDeploymentLogList } from '../../controller/ressource/deployment/listlog.js';
+import { GetJobLogList } from '../../controller/ressource/job/listlog.js';
+import { GetPodLogList } from '../../controller/ressource/pod/listlog.js';
+import { GetReplicaSetLogList } from '../../controller/ressource/replicaset/listlog.js';
+import { GetReplicationControllerLogList } from '../../controller/ressource/replicationcontroller/listlog.js';
+import { GetStatefulSetLogList } from '../../controller/ressource/statefulset/listlog.js';
+import { GetPodDetail } from '../../controller/ressource/pod/pod_detail.js';
+import { GetClusterRoleDetail } from '../../controller/ressource/clusterrole/cluster_role_detail.js';
+import { GetClusterRoleBindingDetail } from '../../controller/ressource/clusterrolebinding/detail.js';
+import { GetConfigMapDetail } from '../../controller/ressource/configmap/configmap_detail.js';
+import { GetCRDDetail } from '../../controller/ressource/crd/crd_detail.js';
+import { GetCronJobDetail } from '../../controller/ressource/cronjob/cronjob_detail.js';
+import { GetDeploymentDetail } from '../../controller/ressource/deployment/deployment_detail.js';
+import { GetHorizontalPodAutoscalerDetail } from '../../controller/ressource/hpa/hpa_detail.js';
+import { GetIngressDetail } from '../../controller/ressource/ingress/ingress_detail.js';
+import { GetJobDetail } from '../../controller/ressource/job/job_detail.js';
+import { GetNamespaceDetail } from '../../controller/ressource/namespace/namespace_detail.js';
+import { GetNetworkPolicyDetail } from '../../controller/ressource/networkpolicy/np_detail.js';
+import { GetNodeDetail } from '../../controller/ressource/node/node_detail.js';
+import { GetPersistentVolumeDetail } from '../../controller/ressource/persistentvolume/pv_detail.js';
+import { GetPersistentVolumeClaimDetail } from '../../controller/ressource/persistentvolumeclaim/pvc_detail.js';
+import { GetReplicaSetDetail } from '../../controller/ressource/replicaset/replicaset_detail.js';
+import { GetReplicationControllerDetail } from '../../controller/ressource/replicationcontroller/rc_detail.js';
+import { GetRoleDetail } from '../../controller/ressource/role/role_detail.js';
+import { GetRoleBindingDetail } from '../../controller/ressource/rolebinding/rolebinding_detail.js';
+import { GetServiceDetail } from '../../controller/ressource/service/service_detail.js';
+import { GetServiceAccountDetail } from '../../controller/ressource/serviceaccount/sva_detail.js';
+import { GetStatefulSetDetail } from '../../controller/ressource/statefulset/statefulset_detail.js';
+import { GetDaemonSetDetail } from '../../controller/ressource/daemonset/daemonSet_detail.js';
+import { GetEventList } from '../../controller/ressource/event/list.js';
+import http from 'http';
+import { WebSocketServer } from 'ws';
+import { GetEndpointList } from '../../controller/ressource/endpoint/list.js';
+
+const kubeconfigPath = '/home/archo/cert/config'
 
 const kubeclient = new k8s.KubeConfig();
+// kubeclient.loadFromFile(kubeconfigPath);
+
+
 kubeclient.loadFromDefault() ;// Will load your default kubeconfig (e.g., ~/.kube/config)
 // Note: if we gone to work with aws i think all of this need to be changed 
 
-const log = new k8s.Log(kubeclient)
+// const log = new k8s.Log(kubeclient)
 // Create a Kubernetes API client
 const k8sApi  = kubeclient.makeApiClient(k8s.CoreV1Api);
 
@@ -62,34 +106,113 @@ const k8scustomObjectsApi = kubeclient.makeApiClient(k8s.CustomObjectsApi);
 const k8seventApi = kubeclient.makeApiClient(k8s.EventsV1Api);
 const k8sapiExtention = kubeclient.makeApiClient(k8s.ApiextensionsV1Api)
 
+// const k8sclient = k8s.KubernetesObjectApi.makeApiClient(kubeclient)
+const k8sclient = kubeclient.makeApiClient(k8s.KubernetesObjectApi)
+
+const metricsClient = new k8s.Metrics(kubeclient);
+
+const k8sLog = new k8s.Log(kubeclient);
+const k8sExec = new k8s.Exec(kubeclient)
+
+// const watch = new k8s.Watch(kubeclient)
+
 enum Errstatus {
     message = 'Missing Or Misconfigured Params',
-    code = 404,
+    code = 400, // i am sorry here about the code just put it 400
     status = 'Not Found',
     reason = ''
 }
-
+enum ErrstatusNs {
+    message = 'Namespace does not exist',
+    code = 400,
+    status = 'Not Found',
+    reason = ''
+}
+            
 // Set useQuerystring to true for CoreV1Api
 (k8sApi as any).useQuerystring = true; // Casting to any is necessary since the property is not directly exposed
 
+// // caching is possible and i am seeing it not fessible in this work until the next time 
+
+// const path = '/api/v1/namespaces';
+// const listN = () => k8sApi.listNamespace();
+// const cache = new k8s.ListWatch(path,watch,listN)
+// let namespaceList: any;
+// const looper = () => {
+//     namespaceList = cache.list();
+//     setTimeout(looper, 20000);
+// };
 export class APIHandler {
 
-    public static async  handleGetConfig(req: Request, res: Response):Promise<void> {
-        try {
-        const config: Config = {
-          serverTime: Date.now(),
-          userAgent: getUserAgent(),
-          version: getVersion(),    
-        };
-      
-        // res.status(200).json(config);
-        res.send('Hello world from TypeScript!');
 
-    } catch(err: any ) {
-        console.log(`Error retreving namespaces ${err}`);
-                    res.status(500).send({error: err.message || 'Internal Server Error'})
+    public static async handleresourceQuotas(req: Request, res: Response): Promise<void> {
+        try {
+            const resourceQuotas = await k8sApi.listResourceQuotaForAllNamespaces();
+
+            res.status(200).json(resourceQuotas)
+        } catch(err: any ) {
+            console.log(`Error retreving namespaces ${err}`);
+                                        res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+        }
     }
+
+    public static async handleCreateQuotas(req: Request, res: Response): Promise<void> {
+        try {
+            const createdQuota = await k8sApi.createNamespacedResourceQuota({
+                namespace: req.params.namespace,
+                body: req.body.quota,
+            });
+              
+            res.status(200).json(createdQuota)
+        } catch(err: any ) {
+            console.log(`Error retreving namespaces ${err}`);
+                                        res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+        }
     }
+
+    // public static async  handleGetConfig(req: Request, res: Response):Promise<void> {
+    //     try {
+    //     const config: Config = {
+    //       serverTime: Date.now(),
+    //       userAgent: getUserAgent(),
+    //       version: getVersion(),    
+    //     };
+      
+    //     // res.status(200).json(config);
+    //     res.send('Hello world from TypeScript!');
+
+    // } catch(err: any ) {
+    //     console.log(`Error retreving namespaces ${err}`);
+    //                                 res.status(500).json({
+    //                 errors: [{
+    //                     ErrStatus:{
+    //                         message: err.message,
+    //                         code: 500,
+    //                         status: 'Internal Server Error',
+    //                         reason: ''
+    //                     }
+    //                 }]
+    //             });
+    // }
+    // }
 
     /**
      * ClusterRoles  
@@ -109,15 +232,17 @@ export class APIHandler {
     //     }
     // }
 
+    
     /**
      * Namespace
      */
     // returns a list of All Namespaces
     public static async handleGetNamespaces(req: Request, res: Response): Promise<void> {
-        try {
+        try {    
             const namespaceList: k8s.V1NamespaceList = await k8sApi.listNamespace(); 
- 
+            
             res.status(200).json(GetNamespaceList(namespaceList));
+
         } catch(err: any) {
             //console.log(`Error retreving namespaces ${err}`);
             res.status(500).send({
@@ -144,7 +269,11 @@ export class APIHandler {
             const namespaceSpec: k8s.CoreV1ApiCreateNamespaceRequest = req.body;
 
             if (!namespaceSpec || !namespaceSpec.body.metadata || !namespaceSpec.body.metadata?.name) {
-                res.status(400).send({ error: 'Invalid namespace specification'});
+                res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 return;
             }
 
@@ -153,28 +282,60 @@ export class APIHandler {
             res.status(201).send('Success saving '+ namespaceSpec.body.metadata.name+ ' Namespace' + response);
         } catch(err: any) {
             //console.log(`Error creating namespace ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'})
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
-    // Return a detail of a naemspace
+    /** Return a detail of a naemspace
+     * 
+     * @param req.params.namespace namespace of the namespace :)
+     * @param res 
+     * @returns 
+     */
     public static async handleGetNamespaceDetail(req: Request, res: Response): Promise<void> {
         try {
             if (!req.params || !req.params.namespace){
-                res.status(400).send({error : 'Invalid request type specification'});
-                return;
+                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
             }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                res.status(404).send('Namespace does not exist')
+                res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 return;
             }
             const Namespace_req: k8s.CoreV1ApiReadNamespaceRequest = {name: req.params.namespace};
 
             const NamespaceDetail = await k8sApi.readNamespace(Namespace_req);
             
-            res.status(200).json(NamespaceDetail);
+            res.status(200).json(GetNamespaceDetail(NamespaceDetail));
         } catch(err: any) {
             //console.log(`Error creating namespace ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'})
+                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
@@ -186,9 +347,19 @@ export class APIHandler {
     public static async handleGetNamespaceEvents(req: Request, res: Response): Promise<void> {
         try{
             if (!req.params || !req.params.name ) {
-                res.status(400).send('Missing ODDr Misconfigured Params');
+                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
             }else if (!await k8sApi.readNamespaceStatus({name: req.params.name})){
-                res.status(404).send('Namespace does not exist')
+                res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
             } else {
                 const event_req: k8s.EventsV1ApiListNamespacedEventRequest = {namespace:req.params.name}
                 const EventList = k8seventApi.listNamespacedEvent(event_req);
@@ -197,34 +368,101 @@ export class APIHandler {
             }
         } catch(err: any) {
             //console.log(`Error creating namespace ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'})
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
-    /**
-     * Events
+
+    /** Return a Events under a Namespace and in All namespaces
+     * 
+     * @param req.params.namespace // Optional
+     * @param res 
+     * @returns 
      */
-    // Return a Events under a Namespace and in All namespaces
     public static async handleGetEventList(req: Request, res: Response): Promise<void> {
         try{
-            let eventlist: Promise<k8s.CoreV1EventList>;
+            let eventlist: k8s.CoreV1EventList;
             if (req.params.namespace) {
                 if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist');
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                });
                     return;
                 }
                 const namespace :k8s.CoreV1ApiListNamespacedEventRequest = {namespace: req.params.namespace}
-                eventlist =  k8sApi.listNamespacedEvent(namespace)
+                eventlist =  await k8sApi.listNamespacedEvent(namespace)
             }else {
                 const event_req: k8s.CoreV1ApiListEventForAllNamespacesRequest = {}
-                eventlist  =  k8sApi.listEventForAllNamespaces(event_req);
+                eventlist  =  await k8sApi.listEventForAllNamespaces(event_req);
             }
 
-            res.status(200).json((await eventlist).items);
+            res.status(200).json(GetEventList(eventlist));
 
         }catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+        }
+    }
+    
+    /** Return a Endpoint under a Namespace and in All namespaces
+     * 
+     * @param req.params.namespace // Optional
+     * @param res 
+     * @returns 
+     */
+    public static async handleGetEndpointList(req: Request, res: Response): Promise<void> {
+        try{
+            let Endpointlist: k8s.V1EndpointsList;
+            if (req.params.namespace) {
+                if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                });
+                    return;
+                }
+                const namespace :k8s.CoreV1ApiListNamespacedEndpointsRequest = {namespace: req.params.namespace}
+                Endpointlist =  await k8sApi.listNamespacedEndpoints(namespace)
+            }else {
+                const Endpoint_req: k8s.CoreV1ApiListEndpointsForAllNamespacesRequest = {}
+                Endpointlist  =  await k8sApi.listEndpointsForAllNamespaces(Endpoint_req);
+            }
+
+            res.status(200).json(GetEndpointList(Endpointlist));
+
+        }catch(err: any){
+            //console.log(`Error fetching Events ${err}`);
+            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
@@ -278,19 +516,38 @@ export class APIHandler {
     public static async handleGetConfigMapDetail(req: Request, res: Response): Promise<void>{
         try{
             if(!req.params ||!req.params.namespace || !req.params.configmap){
-                res.status(400).send('Missing Params');
+                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
             }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                res.status(404).send('Namespace does not exist')
+                res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
             } else {
                 const NamespacedConfigmap : k8s.CoreV1ApiReadNamespacedConfigMapRequest = {namespace: req.params.namespace, name: req.params.configmap}
-                const configmapDetail = k8sApi.readNamespacedConfigMap(NamespacedConfigmap);
+                const configmapDetail = await k8sApi.readNamespacedConfigMap(NamespacedConfigmap);
 
-                res.status(200).json((await configmapDetail));
+                res.status(200).json((GetConfigMapDetail(configmapDetail)));
             }
 
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+            res.status(500).json({
+                errors: [{
+                    ErrStatus:{
+                        message: err.message,
+                        code: 500,
+                        status: 'Internal Server Error',
+                        reason: ''
+                    }
+                }]
+            });
         }
     }
 
@@ -299,6 +556,53 @@ export class APIHandler {
      */
     // Return a list of Pods from all namespaces or namespaced
     public static async handleGetPods(req: Request, res: Response): Promise<void> {
+        // if you see an error on this route plz enable metric in you config it depend what you are using 
+        // i am using minikube 
+        try{
+            let PodListObject: k8s.PodStatus[] ;
+            // let podList: PodList
+            if (req.params.namespace){
+                if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
+                    res.status(404).send({
+                        listMeta: {
+                            totalItems: 0
+                        },
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                        
+                    } as ResourceList)
+                }
+                // const Pod_req: k8s.CoreV1ApiListNamespacedPodRequest = {namespace: req.params.namespace};
+                // PodListObject = await k8sApi.listNamespacedPod(Pod_req);
+                PodListObject = await k8s.topPods(k8sApi, metricsClient, req.params.namespace);
+            } else {
+                // const pod_req: k8s.CoreV1ApiListPodForAllNamespacesRequest ={}
+                // PodListObject = await k8sApi.listPodForAllNamespaces(pod_req)
+                PodListObject = await k8s.topPods(k8sApi, metricsClient);
+            }
+
+            res.status(200).json(GetPodList(PodListObject));
+
+        } catch(err: any) {
+            //console.log(`Error fetching Events ${err}`);
+            res.status(500).send({
+                listMeta: {
+                    totalItems: 0
+                },
+                errors: [{
+                    ErrStatus:{
+                        message: err.message,
+                        code: 500,
+                        status: 'Internal Server Error',
+                        reason: ''
+                    }
+                }]
+                
+            } as ResourceList)
+        }
+    }
+    /*public static async handleGetPods(req: Request, res: Response): Promise<void> {
         try{
             let PodListObject: k8s.V1PodList ;
             if (req.params.namespace){
@@ -339,25 +643,90 @@ export class APIHandler {
                 
             } as ResourceList)
         }
-    }
+    }*/
+        
+        // Return a list of container for a Pod
+        public static async handleGetPodContainers(req: Request, res: Response):Promise<void> {
+            try{
+                if (!req.params || !req.params.namespace || !req.params.pod) {
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
+                }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
+                } else {
+                    const namespacedPod: k8s.CoreV1ApiReadNamespacedPodRequest = {namespace: req.params.namespace, name: req.params.pod}
+                    const podDetail = k8sApi.readNamespacedPod(namespacedPod);
+    
+                    const containerNameList: string[] = (await podDetail).spec?.containers.map((container) => {
+                        return container.name;
+                    }) || [''];
+                    const podContainerList : PodContainerList = {
+                        containers: containerNameList
+                    }
+    
+                    res.status(200).json(podContainerList);
+                }
+    
+            } catch(err: any){
+                //console.log(`Error fetching Events ${err}`);
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+            }
+        }
     
     // Return Detailed information about Pod
     public static async handleGetPodDetail(req: Request, res: Response):Promise<void> {
         try{
             if (!req.params || !req.params.namespace || !req.params.pod) {
-                res.status(400).send('Missing Or Misconfigured Params');
+                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
             }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                res.status(404).send('Namespace does not exist')
+                res.status(404).json({
+                    errors: Errstatus
+                })
             } else {
                 const namespacedPod: k8s.CoreV1ApiReadNamespacedPodRequest = {namespace: req.params.namespace, name: req.params.pod}
-                const podDetail = k8sApi.readNamespacedPod(namespacedPod);
+                const podDetail = await k8sApi.readNamespacedPod(namespacedPod);
                 
-                res.status(200).json((await podDetail));
+                res.status(200).json(GetPodDetail(podDetail));
             }
 
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+            res.status(500).json(               
+                {
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                }
+            );
         }
     }
 
@@ -365,52 +734,59 @@ export class APIHandler {
     public static async handleGetPodEvents(req: Request,res: Response):Promise<void> {
         try{
             if (!req.params || !req.params.namespace || !req.params.pod) {
-                res.status(400).send('Missing Or Misconfigured Params');
+                                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
             }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                res.status(404).send('Namespace does not exist')
+                res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
             } else {
                 const event_req: k8s.EventsV1ApiListNamespacedEventRequest = {namespace:req.params.namespace, fieldSelector: `involvedObject.name=${req.params.pod},involvedObject.kind=Pod` }
-                const EventList = k8seventApi.listNamespacedEvent(event_req);
-
+                console.log('event_Req', event_req)
+                const EventList = k8sApi.listNamespacedEvent(event_req);
+                console.log('Eventlist ' , EventList)
                 res.status(200).json(await EventList);
             }
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
-    // Return a list of container for a Pod
-    public static async handleGetPodContainers(req: Request, res: Response):Promise<void> {
-        try{
-            if (!req.params || !req.params.namespace || !req.params.pod) {
-                res.status(400).send('Missing Or Misconfigured Params');
-            }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                res.status(404).send('Namespace does not exist')
-            } else {
-                const namespacedPod: k8s.CoreV1ApiReadNamespacedPodRequest = {namespace: req.params.namespace, name: req.params.pod}
-                const podDetail = k8sApi.readNamespacedPod(namespacedPod);
-
-                // const containerNameList: string[] = (await podDetail).spec?.containers.map((container) => {
-                //     return container.name;
-                // }) || [''];
-
-                res.status(200).json(await podDetail);
-            }
-
-        } catch(err: any){
-            //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
-        }
-    }
 
     // Return list of pvcName in a specific Pod 
     public static async handleGetPodPersistentVolumeClaims(req: Request, res: Response):Promise<void> {
         try{
             if (!req.params || !req.params.namespace || !req.params.pod) {
-                res.status(400).send('Missing Or Misconfigured Params');
+                                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
             }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                res.status(404).send('Namespace does not exist')
+                res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
             } else {
                 const pod_req: k8s.CoreV1ApiReadNamespacedPodRequest = {namespace: req.params.namespace, name:req.params.pod};
                 const podDetail = k8sApi.readNamespacedPod(pod_req);
@@ -423,18 +799,99 @@ export class APIHandler {
             }
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
-    // Handles exec into pod
+    /** Handles exec into pod
+     * 
+     * @param req.namespace namespace of the Pod
+     * @param req.pod name of the Pod
+     * @param req.container name of container in the Pod
+    * @param res 
+     */
     public static async handleExecShell(req: Request, res: Response):Promise<void> {
         try{
+            // if (!req.params || !req.params.namespace || !req.params.pod || !req.params.container  ) {
+            //     res.status(400).json(
+            //         {
+            //             errors: [{
+            //                 ErrStatus: Errstatus
+            //             }]
+            //         }
+            //     );
+            // }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
+            //     res.status(404).json({
+            //         errors: [{
+            //             ErrStatus: ErrstatusNs
+            //         }]
+            //     })
+            // } else {
+            //     const server = http.createServer()
+                
+            //     const ws = new WebSocketServer({ server: server });
 
-            // Not implemented yet 
+            //     ws.on('connection', async (socket: WebSocket) => {
+
+
+            //         const stdinStream = new stream.PassThrough();
+            //         const stdoutStream = new stream.PassThrough();
+
+
+            //         // Forward kube stdout/stderr to websocket
+            //         stdoutStream.on('data', (chunk) => {
+            //             socket.send(chunk.toString());
+            //         });
+
+            //         // Forward browser data to kube stdin
+            //         ws.on('message', (data) => {
+            //             stdinStream.write(data);
+            //         });
+
+            //         ws.on('close', () => {
+            //             stdinStream.end();
+            //             stdoutStream.end();
+            //         });
+
+            //         try {
+            //             await k8sExec.exec(
+            //                 req.params.namespace,
+            //                 req.params.pod,
+            //                 req.params.container,
+            //                 req.params.command || ['/bin/bash', '-l'],
+            //                 stdoutStream,
+            //                 stdoutStream, // merge stderr with stdout
+            //                 stdinStream,
+            //                 true
+            //             );
+            //         } catch (err) {
+            //             socket.send('Error: ' + (err as Error).message);
+            //             socket.close();
+            //         }
+            //     });
+
+            // }
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
@@ -486,19 +943,38 @@ export class APIHandler {
     public static async handleGetServiceDetail(req: Request, res: Response):Promise<void> {
         try{
             if (!req.params || !req.params.namespace || !req.params.service) {
-                res.status(400).send('Missing Or Misconfigured Params');
+                                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
             }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                res.status(404).send('Namespace does not exist')
+                res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
             } else {
                 const namespacedService: k8s.CoreV1ApiReadNamespacedServiceRequest = {namespace: req.params.namespace, name: req.params.service}
-                const ServiceDetail = k8sApi.readNamespacedService(namespacedService);
+                const ServiceDetail = await k8sApi.readNamespacedService(namespacedService);
                 
-                res.status(200).json((await ServiceDetail));
+                res.status(200).json(GetServiceDetail(ServiceDetail));
             }
 
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
@@ -506,9 +982,19 @@ export class APIHandler {
     public static async handleGetServiceEvent(req: Request, res: Response):Promise<void> {
         try{
             if (!req.params || !req.params.namespace || !req.params.service) {
-                res.status(400).send('Missing Or Misconfigured Params');
+                                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
             }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                res.status(404).send('Namespace does not exist')
+                res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
             } else {
                 const resources: k8s.CoreV1ApiListNamespacedEventRequest = {namespace: req.params.namespace, fieldSelector: `involvedObject.name=${req.params.service}`};
                 const ServiceEvent = k8sApi.listNamespacedEvent(resources);
@@ -517,7 +1003,16 @@ export class APIHandler {
             }
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
@@ -525,9 +1020,19 @@ export class APIHandler {
     public static async handleGetServicePods(req: Request, res: Response):Promise<void> {
         try{
             if (!req.params || !req.params.namespace || !req.params.service) {
-                res.status(400).send('Missing Or Misconfigured Params');
+                                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
             }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                res.status(404).send('Namespace does not exist')
+                res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
             } else {
                 const Service_req: k8s.CoreV1ApiReadNamespacedServiceRequest = {namespace: req.params.namespace, name: req.params.service}
                 const Service = k8sApi.readNamespacedService(Service_req)
@@ -548,7 +1053,16 @@ export class APIHandler {
             }
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
@@ -556,9 +1070,19 @@ export class APIHandler {
     public static async handleGetServiceIngressList(req: Request, res: Response):Promise<void> {
         try{
             if (!req.params || !req.params.namespace || !req.params.service) {
-                res.status(400).send('Missing Or Misconfigured Params');
+                                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
             }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                res.status(404).send('Namespace does not exist')
+                res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
             } else {
                 const Ingress_req: k8s.NetworkingV1ApiListNamespacedIngressRequest = {namespace: req.params.namespace}
                 const IngressList = k8snetworkingApi.listNamespacedIngress(Ingress_req)
@@ -576,7 +1100,16 @@ export class APIHandler {
 
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
@@ -627,18 +1160,37 @@ export class APIHandler {
     public static async handleGetSecretDetail(req: Request, res: Response):Promise<void> {
         try{
             if (!req.params || !req.params.namespace || !req.params.name) {
-                res.status(400).send('Missing Or Misconfigured Params');
+                                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
             }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                res.status(404).send('Namespace does not exist')
+                res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
             } else {
                 const namespacedSecret: k8s.CoreV1ApiReadNamespacedSecretRequest = {namespace: req.params.namespace, name: req.params.name}
-                const ServiceDetail = k8sApi.readNamespacedSecret(namespacedSecret);
+                const ServiceDetail = await k8sApi.readNamespacedSecret(namespacedSecret);
                 
-                res.status(200).json((await ServiceDetail));
+                res.status(200).json(GetServiceDetail(ServiceDetail));
             }
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
@@ -648,15 +1200,25 @@ export class APIHandler {
             // Not Imp
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
     // Returns a list of Nodes 
     public static async handleGetNodeList(req: Request, res: Response):Promise<void> {
         try{
-            const node_req: k8s.CoreV1ApiListNodeRequest = {}
-            const NodeListObj: k8s.V1NodeList = await k8sApi.listNode(node_req);
+            // const node_req: k8s.CoreV1ApiListNodeRequest = {}
+            // const NodeListObj: k8s.V1NodeList = await k8sApi.listNode(node_req);
+            const NodeListObj: k8s.NodeStatus[] = await k8s.topNodes(k8sApi);
 
             res.status(200).json(GetNodeList(NodeListObj))
         } catch(err: any){
@@ -682,18 +1244,33 @@ export class APIHandler {
     public static async handleGetNodeDetail(req: Request, res: Response):Promise<void> {
         try{
             if(!req.params || !req.params.name){
-                res.status(400).send('Missing Or Misconfigured Params');
+                                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 return;
             } else {
                 const node_req: k8s.CoreV1ApiReadNodeRequest = {name: req.params.name}
-                const NodeObj = k8sApi.readNode(node_req); 
+                const NodeObj = await k8sApi.readNode(node_req); 
 
-                res.status(200).json(NodeObj);
+                res.status(200).json(GetNodeDetail(NodeObj));
                 return;
             }
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
@@ -701,7 +1278,13 @@ export class APIHandler {
     public static async handleGetNodeEvents(req: Request, res: Response):Promise<void> {
         try{
             if(!req.params || !req.params.name){
-                res.status(400).send('Missing Or Misconfigured Params');
+                                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
             } else {
                 const event_req: k8s.CoreV1ApiListEventForAllNamespacesRequest = {fieldSelector:`involvedObject.kind=Node,involvedObject.name=${req.params.name}`}
                 
@@ -711,7 +1294,16 @@ export class APIHandler {
             }
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
@@ -719,7 +1311,13 @@ export class APIHandler {
     public static async handleGetNodePods(req: Request, res: Response):Promise<void> {
         try{
             if(!req.params || !req.params.name){
-                res.status(400).send('Missing Or Misconfigured Params');
+                                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
             } else {
                 const pod_req: k8s.CoreV1ApiListPodForAllNamespacesRequest = {fieldSelector:`involvedObject.kind=Node,involvedObject.name=${req.params.name}`}
                 
@@ -729,7 +1327,16 @@ export class APIHandler {
             }
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
@@ -739,7 +1346,16 @@ export class APIHandler {
             // Not Imp
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
@@ -792,18 +1408,37 @@ export class APIHandler {
     public static async handleGetRoleDetail(req: Request, res: Response):Promise<void> {
         try{
             if (!req.params || !req.params.namespace || !req.params.name) {
-                res.status(400).send('Missing Or Misconfigured Params');
+                                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
             }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                res.status(404).send('Namespace does not exist')
+                res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
             } else {
                 const role_req: k8s.RbacAuthorizationV1ApiReadNamespacedRoleRequest = {namespace: req.params.namespace, name: req.params.name}
-                const RoleObj = k8sApiRbac.readNamespacedRole(role_req);
+                const RoleObj = await k8sApiRbac.readNamespacedRole(role_req);
 
-                res.status(200).json(await RoleObj);
+                res.status(200).json(GetRoleDetail(RoleObj));
             }
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
@@ -857,18 +1492,37 @@ export class APIHandler {
     public static async handleGetRoleBindingDetail(req: Request, res: Response):Promise<void> {
         try{
             if (!req.params || !req.params.namespace || !req.params.name) {
-                res.status(400).send('Missing Or Misconfigured Params');
+                                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
             }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                res.status(404).send('Namespace does not exist')
+                res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
             } else {
                 const rolebinding_req: k8s.RbacAuthorizationV1ApiReadNamespacedRoleBindingRequest = {namespace: req.params.namespace, name: req.params.name}
-                const RoleBindingObj = k8sApiRbac.readNamespacedRoleBinding(rolebinding_req);
+                const RoleBindingObj = await k8sApiRbac.readNamespacedRoleBinding(rolebinding_req);
 
-                res.status(200).json( await RoleBindingObj);
+                res.status(200).json(GetRoleBindingDetail(RoleBindingObj));
             }
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
@@ -919,18 +1573,37 @@ export class APIHandler {
     public static async handleGetServiceAccountDetail(req: Request, res: Response):Promise<void> {
         try{
             if (!req.params || !req.params.namespace || !req.params.serviceaccount) {
-                res.status(400).send('Missing Or Misconfigured Params');
+                                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
             }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                res.status(404).send('Namespace does not exist')
+                res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
             } else {
                 const serviceaccount_req: k8s.CoreV1ApiReadNamespacedServiceAccountRequest = {namespace: req.params.namespace, name: req.params.serviceaccount}
-                const ServiceAccountObj = k8sApi.readNamespacedServiceAccount(serviceaccount_req);
+                const ServiceAccountObj = await k8sApi.readNamespacedServiceAccount(serviceaccount_req);
 
-                res.status(200).json( await ServiceAccountObj);
+                res.status(200).json(GetServiceAccountDetail(ServiceAccountObj));
             }
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
@@ -938,9 +1611,19 @@ export class APIHandler {
     public static async handleGetServiceAccountSecrets(req: Request, res: Response):Promise<void> {
         try{
             if (!req.params || !req.params.namespace || !req.params.serviceaccount) {
-                res.status(400).send('Missing Or Misconfigured Params');
+                                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
             }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                res.status(404).send('Namespace does not exist')
+                res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
             } else {
                 const serviceaccount_req: k8s.CoreV1ApiReadNamespacedServiceAccountRequest = {namespace: req.params.namespace, name: req.params.serviceaccount}
                 const ServiceAccountObj = k8sApi.readNamespacedServiceAccount(serviceaccount_req);
@@ -950,7 +1633,16 @@ export class APIHandler {
             }
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
@@ -958,9 +1650,19 @@ export class APIHandler {
     public static async handleGetServiceAccountImagePullSecrets(req: Request, res: Response):Promise<void> {
         try{
             if (!req.params || !req.params.namespace || !req.params.serviceaccount) {
-                res.status(400).send('Missing Or Misconfigured Params');
+                                res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
             }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                res.status(404).send('Namespace does not exist')
+                res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
             } else {
                 const serviceaccount_req: k8s.CoreV1ApiReadNamespacedServiceAccountRequest = {namespace: req.params.namespace, name: req.params.serviceaccount}
                 const ServiceAccountObj = k8sApi.readNamespacedServiceAccount(serviceaccount_req);
@@ -970,7 +1672,16 @@ export class APIHandler {
             }
         } catch(err: any){
             //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({error: err.message || 'Internal Server Error'});
+                            res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
         }
     }
 
@@ -1003,7 +1714,13 @@ export class APIHandler {
         public static async handleGetStorageClass(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.name) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 } else {
                     const StorageClass_req: k8s.StorageV1ApiReadStorageClassRequest = {name: req.params.name}
                     const StorageClass = k8sStorageApi.readStorageClass(StorageClass_req);
@@ -1012,7 +1729,16 @@ export class APIHandler {
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         }
 
@@ -1022,7 +1748,16 @@ export class APIHandler {
     
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         }
 
@@ -1057,17 +1792,28 @@ export class APIHandler {
         public static async handleGetClusterRoleDetail(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.name) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                    res.status(400).json(Errstatus);
                 } else {
                     const ClusterRole_req: k8s.RbacAuthorizationV1ApiReadClusterRoleRequest = {name: req.params.name}
-                    const clusterRoleDetail = k8sApiRbac.readClusterRole(ClusterRole_req);
+                    const clusterRoleDetail = await k8sApiRbac.readClusterRole(ClusterRole_req);
 
-                    res.status(200).json(await clusterRoleDetail)
+                    res.status(200).json(GetClusterRoleDetail(clusterRoleDetail))
                 }
 
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                res.status(500).json(               
+                    {
+                        errors: [{
+                            ErrStatus:{
+                                message: err.message,
+                                code: 500,
+                                status: 'Internal Server Error',
+                                reason: ''
+                            }
+                        }]
+                    }
+                );
             }
         }
 
@@ -1100,16 +1846,26 @@ export class APIHandler {
         public static async handleGetClusterRoleBindingDetail(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.name) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                    res.status(400).json({
+                        errors: Errstatus
+                    });
                 } else {
                     const ClusterRoleBinding_req: k8s.RbacAuthorizationV1ApiReadClusterRoleBindingRequest = {name: req.params.name}
-                    const ClusterRoleBindingDetail = k8sApiRbac.readClusterRoleBinding(ClusterRoleBinding_req);
+                    const ClusterRoleBindingDetail = await k8sApiRbac.readClusterRoleBinding(ClusterRoleBinding_req);
 
-                    res.status(200).json(await ClusterRoleBindingDetail)
+                    res.status(200).json(GetClusterRoleBindingDetail(ClusterRoleBindingDetail))
                 }
             } catch(err: any){
-                //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         }
 
@@ -1157,22 +1913,46 @@ export class APIHandler {
             }
         }
 
-        // Returns detailed information about CronJob
+        /** Returns detailed information about CronJob
+         * 
+         * @param req.params.namespace namespace of the CronJob
+         * @param req.params.name name of the Cronjob
+         * @param res 
+         */
         public static async handleGetCronJobDetail(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.name) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const Cronjob_req: k8s.BatchV1ApiReadNamespacedCronJobRequest = {namespace: req.params.namespace, name: req.params.name};
-                    const CronJobDetail = k8sbatchApi.readNamespacedCronJob(Cronjob_req);
+                    const CronJobDetail = await k8sbatchApi.readNamespacedCronJob(Cronjob_req);
 
-                    res.status(200).json(CronJobDetail);
+                    res.status(200).json(GetCronJobDetail(CronJobDetail));
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         }
 
@@ -1180,9 +1960,19 @@ export class APIHandler {
         public static async handleGetCronJobJobs(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.name) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const CronJob_req: k8s.BatchV1ApiListNamespacedJobRequest = {namespace:req.params.namespace, fieldSelector: `involvedObject.name=${req.params.name},involvedObject.kind=CronJob` }
                     const CronJob_list = k8sbatchApi.listNamespacedJob(CronJob_req);
@@ -1191,7 +1981,16 @@ export class APIHandler {
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         }
 
@@ -1199,9 +1998,19 @@ export class APIHandler {
         public static async handleGetCronJobEvents(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.name) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const event_req: k8s.EventsV1ApiListNamespacedEventRequest = {namespace:req.params.namespace, fieldSelector: `involvedObject.name=${req.params.name},involvedObject.kind=CronJob` }
                     const EventList = k8seventApi.listNamespacedEvent(event_req);
@@ -1210,7 +2019,16 @@ export class APIHandler {
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         }
 
@@ -1219,9 +2037,19 @@ export class APIHandler {
             // name: name of the CronJob
             try{
                 if (!req.params || !req.params.namespace || !req.params.name) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const Result = await triggerCronJob(kubeclient, req.params.namespace, req.params.name);
                     
@@ -1235,7 +2063,16 @@ export class APIHandler {
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         }
 
@@ -1282,22 +2119,46 @@ export class APIHandler {
             }
         } 
 
-        // Returns detailed information about Job
+        /** Returns detailed information about Job
+         * 
+         * @param req.params.namespace namespace of the Job
+         * @param req.params.name name of the Job
+         * @param res 
+         */
         public static async handleGetJobDetail(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.name) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const Job_req: k8s.BatchV1ApiReadNamespacedJobRequest = {namespace: req.params.namespace, name: req.params.name}
-                    const JobDetail = k8sbatchApi.readNamespacedJob(Job_req)
+                    const JobDetail = await k8sbatchApi.readNamespacedJob(Job_req)
 
-                    res.status(200).json(JobDetail);
+                    res.status(200).json(GetJobDetail(JobDetail));
                 }    
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1305,9 +2166,19 @@ export class APIHandler {
         public static async handleGetJobPods(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.name) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const Pod_Job_req: k8s.CoreV1ApiListNamespacedPodRequest = {namespace: req.params.namespace, fieldSelector:`metadata.ownerReferences.name=${req.params.name}`}
                     const Pod_Job_list = k8sApi.listNamespacedPod(Pod_Job_req) 
@@ -1320,7 +2191,16 @@ export class APIHandler {
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1328,9 +2208,19 @@ export class APIHandler {
         public static async handleGetJobEvents(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.name) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const event_req: k8s.EventsV1ApiListNamespacedEventRequest = {namespace:req.params.namespace, fieldSelector: `involvedObject.name=${req.params.name},involvedObject.kind=Job` }
                     const EventList = k8seventApi.listNamespacedEvent(event_req);
@@ -1339,7 +2229,16 @@ export class APIHandler {
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1391,18 +2290,37 @@ export class APIHandler {
         public static async handleGetDaemonSetDetail(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.daemonSet) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const DaemonSet_req: k8s.AppsV1ApiReadNamespacedDaemonSetRequest = {namespace: req.params.namespace, name: req.params.daemonSet};
-                    const DaemonSetDetail = k8sAppApi.readNamespacedDaemonSet(DaemonSet_req);
+                    const DaemonSetDetail = await k8sAppApi.readNamespacedDaemonSet(DaemonSet_req);
 
-                    res.status(200).json(DaemonSetDetail);
+                    res.status(200).json(GetDaemonSetDetail(DaemonSetDetail));
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1410,9 +2328,19 @@ export class APIHandler {
         public static async handleGetDaemonSetPods(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.daemonSet) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const DaemonSet_req: k8s.AppsV1ApiReadNamespacedDaemonSetRequest = {namespace: req.params.namespace, name: req.params.daemonSet}
                     const DaemonSet = k8sAppApi.readNamespacedDaemonSet(DaemonSet_req)
@@ -1441,7 +2369,16 @@ export class APIHandler {
                 }                
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1449,9 +2386,19 @@ export class APIHandler {
         public static async handleGetDaemonSetServices(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.daemonSet) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const DaemonSet_req: k8s.AppsV1ApiReadNamespacedDaemonSetRequest = {namespace: req.params.namespace, name: req.params.daemonSet}
                     const DaemonSet = k8sAppApi.readNamespacedDaemonSet(DaemonSet_req)
@@ -1480,7 +2427,16 @@ export class APIHandler {
                 }  
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1488,9 +2444,19 @@ export class APIHandler {
         public static async handleGetDaemonSetEvents(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.daemonSet) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const event_req: k8s.EventsV1ApiListNamespacedEventRequest = {namespace:req.params.namespace, fieldSelector: `involvedObject.name=${req.params.daemonSet},involvedObject.kind=DaemonSet` }
                     const EventList = k8seventApi.listNamespacedEvent(event_req);
@@ -1499,7 +2465,16 @@ export class APIHandler {
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1509,7 +2484,16 @@ export class APIHandler {
     
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1557,22 +2541,46 @@ export class APIHandler {
             }
         } 
 
-        // Returns detailed information about Deployment
+        /** Returns detailed information about Deployment
+         * 
+         * @param req.params.namespace namespace of the Deployment
+         * @param req.params.name name of the Deployment
+         * @param res 
+         */
         public static async handleGetDeploymentDetail(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.deployment) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const Deployment_req: k8s.AppsV1ApiReadNamespacedDeploymentRequest = {namespace: req.params.namespace, name: req.params.deployment};
-                    const DeploymentDetail = k8sAppApi.readNamespacedDeployment(Deployment_req);
+                    const DeploymentDetail = await k8sAppApi.readNamespacedDeployment(Deployment_req);
 
-                    res.status(200).json(DeploymentDetail);
+                    res.status(200).json(GetDeploymentDetail(DeploymentDetail));
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1580,9 +2588,19 @@ export class APIHandler {
         public static async handleGetDeploymentEvents(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.deployment) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const event_req: k8s.EventsV1ApiListNamespacedEventRequest = {namespace:req.params.namespace, fieldSelector: `involvedObject.name=${req.params.deployment},involvedObject.kind=Deployment` }
                     const EventList = k8seventApi.listNamespacedEvent(event_req);
@@ -1591,7 +2609,16 @@ export class APIHandler {
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1599,9 +2626,19 @@ export class APIHandler {
         public static async handleGetDeploymentOldReplicaSets(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.deployment) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const Deployment_req: k8s.AppsV1ApiReadNamespacedDeploymentRequest = {namespace: req.params.namespace, name: req.params.deployment};
                     const Deployment = k8sAppApi.readNamespacedDeployment(Deployment_req);
@@ -1648,7 +2685,16 @@ export class APIHandler {
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1656,9 +2702,19 @@ export class APIHandler {
         public static async handleGetDeploymentNewReplicaSet(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.deployment) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const Deployment_req: k8s.AppsV1ApiReadNamespacedDeploymentRequest = {namespace: req.params.namespace, name: req.params.deployment};
                     const Deployment = k8sAppApi.readNamespacedDeployment(Deployment_req);
@@ -1690,7 +2746,16 @@ export class APIHandler {
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1700,7 +2765,16 @@ export class APIHandler {
     
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1710,7 +2784,16 @@ export class APIHandler {
     
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1720,7 +2803,16 @@ export class APIHandler {
     
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1730,7 +2822,16 @@ export class APIHandler {
     
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1790,18 +2891,37 @@ export class APIHandler {
         public static async handleGetHorizontalPodAutoscalerDetail(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.horizontalpodautoscaler) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const HorizontalPodAutoscaler_req: k8s.AutoscalingV1ApiReadNamespacedHorizontalPodAutoscalerRequest = {namespace: req.params.namespace, name: req.params.horizontalpodautoscaler};
-                    const HorizontalPodAutoscalerDetail = k8sautoscalingApi.readNamespacedHorizontalPodAutoscaler(HorizontalPodAutoscaler_req);
+                    const HorizontalPodAutoscalerDetail = await k8sautoscalingApi.readNamespacedHorizontalPodAutoscaler(HorizontalPodAutoscaler_req);
 
-                    res.status(200).json(HorizontalPodAutoscalerDetail);
+                    res.status(200).json(GetHorizontalPodAutoscalerDetail(HorizontalPodAutoscalerDetail));
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1815,9 +2935,19 @@ export class APIHandler {
         public static async handleGetHorizontalPodAutoscalerListForResource(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.horizontalpodautoscaler || !req.params.kind) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const HorizontalPodAutoscaler_req: k8s.AutoscalingV1ApiListNamespacedHorizontalPodAutoscalerRequest = {namespace: req.params.namespace}
                     const HorizontalPodAutoscalerList = k8sautoscalingApi.listNamespacedHorizontalPodAutoscaler(HorizontalPodAutoscaler_req);
@@ -1830,7 +2960,16 @@ export class APIHandler {
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1884,22 +3023,46 @@ export class APIHandler {
             }
         } 
 
-        // Returns detailed information about Ingress
+        /** Returns detailed information about Ingress
+         * 
+         * @param req.params.namespace namespace of the Ingress
+         * @param req.params.name name of the Ingress
+         * @param res 
+         */
         public static async handleGetIngressDetail(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.name) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const Ingress_req: k8s.NetworkingV1ApiReadNamespacedIngressRequest = {namespace: req.params.namespace, name: req.params.name};
-                    const IngressDetail = k8snetworkingApi.readNamespacedIngress(Ingress_req);
+                    const IngressDetail = await k8snetworkingApi.readNamespacedIngress(Ingress_req);
 
-                    res.status(200).json(IngressDetail);
+                    res.status(200).json(GetIngressDetail(IngressDetail));
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1907,9 +3070,19 @@ export class APIHandler {
         public static async handleGetIngressEvent(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.ingress) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const event_req: k8s.EventsV1ApiListNamespacedEventRequest = {namespace:req.params.namespace, fieldSelector: `involvedObject.name=${req.params.ingress},involvedObject.kind=Ingress` }
                     const EventList = k8seventApi.listNamespacedEvent(event_req);
@@ -1918,7 +3091,16 @@ export class APIHandler {
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -1952,7 +3134,13 @@ export class APIHandler {
         public static async handleGetIngressClass(req: Request, res: Response):Promise<void> {
             try{                
                 if (!req.params || !req.params.ingressclass) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else {
                     const IngressClass_req: k8s.NetworkingV1ApiReadIngressClassRequest = {name: req.params.ingressclass};
                     const IngressClassDetail = k8snetworkingApi.readIngressClass(IngressClass_req);
@@ -1961,7 +3149,16 @@ export class APIHandler {
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -2012,20 +3209,39 @@ export class APIHandler {
         public static async handleGetNetworkPolicyDetail(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params|| !req.params.namespace || !req.params.networkpolicy) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
 
                  }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                        res.status(404).send('Namespace does not exist')
+                        res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                      
                  } else {
                     const NetworkingPolicie_req: k8s.NetworkingV1ApiReadNamespacedNetworkPolicyRequest = {namespace: req.params.namespace, name: req.params.networkpolicy};
-                    const NetworkingPolicieDetail = k8snetworkingApi.readNamespacedNetworkPolicy(NetworkingPolicie_req);
+                    const NetworkingPolicieDetail = await k8snetworkingApi.readNamespacedNetworkPolicy(NetworkingPolicie_req);
 
-                    res.status(200).json(NetworkingPolicieDetail);
+                    res.status(200).json(GetNetworkPolicyDetail(NetworkingPolicieDetail));
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -2059,16 +3275,31 @@ export class APIHandler {
         public static async handleGetPersistentVolumeDetail(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.persistentvolume) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 } else {
                     const PersistentVolume_req: k8s.CoreV1ApiReadPersistentVolumeRequest = { name: req.params.persistentvolume};
-                    const persistentvolumeDetail = k8sApi.readPersistentVolume(PersistentVolume_req);
+                    const persistentvolumeDetail = await k8sApi.readPersistentVolume(PersistentVolume_req);
 
-                    res.status(200).json(persistentvolumeDetail);
+                    res.status(200).json(GetPersistentVolumeDetail(persistentvolumeDetail));
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -2120,20 +3351,39 @@ export class APIHandler {
         public static async handleGetPersistentVolumeClaimDetail(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.name) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
 
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                  
                  } else {
                     const PersistentVolumeClaim_req: k8s.CoreV1ApiReadNamespacedPersistentVolumeClaimRequest = {namespace: req.params.namespace, name: req.params.name};
-                    const persistentvolumeclaimDetail = k8sApi.readNamespacedPersistentVolumeClaim(PersistentVolumeClaim_req);
+                    const persistentvolumeclaimDetail = await k8sApi.readNamespacedPersistentVolumeClaim(PersistentVolumeClaim_req);
 
-                    res.status(200).json(persistentvolumeclaimDetail);
+                    res.status(200).json(GetPersistentVolumeClaimDetail(persistentvolumeclaimDetail));
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -2183,20 +3433,39 @@ export class APIHandler {
         public static async handleGetReplicaSetDetail(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.replicaSet) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
 
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                  
                  } else {
                     const ReplicaSet_req: k8s.AppsV1ApiReadNamespacedReplicaSetRequest = {namespace: req.params.namespace, name: req.params.replicaSet};
-                    const ReplicaSetDetail = k8sAppApi.readNamespacedReplicaSet(ReplicaSet_req);
+                    const ReplicaSetDetail = await k8sAppApi.readNamespacedReplicaSet(ReplicaSet_req);
 
-                    res.status(200).json(ReplicaSetDetail);
+                    res.status(200).json(GetReplicaSetDetail(ReplicaSetDetail));
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -2206,7 +3475,16 @@ export class APIHandler {
     
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -2217,7 +3495,16 @@ export class APIHandler {
     
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -2225,9 +3512,19 @@ export class APIHandler {
         public static async handleGetReplicaSetEvents(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.replicaSet) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const event_req: k8s.EventsV1ApiListNamespacedEventRequest = {namespace:req.params.namespace, fieldSelector: `involvedObject.name=${req.params.replicaSet},involvedObject.kind=ReplicaSet` }
                     const EventList = k8seventApi.listNamespacedEvent(event_req);
@@ -2236,7 +3533,16 @@ export class APIHandler {
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -2286,20 +3592,39 @@ export class APIHandler {
         public static async handleGetReplicationControllerDetail(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.replicationController) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
 
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                  
                  } else {
                     const ReplicationController_req: k8s.CoreV1ApiReadNamespacedReplicationControllerRequest = {namespace: req.params.namespace, name: req.params.replicationController};
-                    const ReplicationControllerDetail = k8sApi.readNamespacedReplicationController(ReplicationController_req);
+                    const ReplicationControllerDetail = await k8sApi.readNamespacedReplicationController(ReplicationController_req);
 
-                    res.status(200).json(ReplicationControllerDetail);
+                    res.status(200).json(GetReplicationControllerDetail(ReplicationControllerDetail));
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -2309,7 +3634,16 @@ export class APIHandler {
     
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -2317,9 +3651,19 @@ export class APIHandler {
         public static async handleGetReplicationControllerPods(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.replicationController) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     const ReplicationController_req: k8s.CoreV1ApiReadNamespacedReplicationControllerRequest = {namespace: req.params.namespace, name: req.params.replicationController};
                     const ReplicationControllerDetail = k8sApi.readNamespacedReplicationController(ReplicationController_req);
@@ -2341,7 +3685,16 @@ export class APIHandler {
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -2349,9 +3702,19 @@ export class APIHandler {
         public static async handleGetReplicationControllerEvents(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.replicationController) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                 } else {
                     // if tested and not working just replace the Eventv1api to corev1api 
                     /*EventsV1Api is for Events in the newer events.k8s.io/v1 API, which is mainly for Event resources
@@ -2364,7 +3727,16 @@ export class APIHandler {
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -2392,7 +3764,16 @@ export class APIHandler {
                 res.status(200).json(matchedService);
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
         
@@ -2444,22 +3825,41 @@ export class APIHandler {
             try{
                 if (!req.params || !req.params.namespace || !req.params.statefulset) {
 
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
 
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
 
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                  
                  } else {
 
                     const StatefulSet_req: k8s.AppsV1ApiReadNamespacedStatefulSetRequest = {namespace: req.params.namespace, name: req.params.statefulset};
-                    const StatefulSetDetail = k8sAppApi.readNamespacedStatefulSet(StatefulSet_req);
+                    const StatefulSetDetail = await k8sAppApi.readNamespacedStatefulSet(StatefulSet_req);
 
-                    res.status(200).json(StatefulSetDetail);
+                    res.status(200).json(GetStatefulSetDetail(StatefulSetDetail));
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -2470,7 +3870,16 @@ export class APIHandler {
     
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -2480,7 +3889,16 @@ export class APIHandler {
     
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -2490,7 +3908,16 @@ export class APIHandler {
     
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         }  
 
@@ -2504,7 +3931,7 @@ export class APIHandler {
                 res.status(200).json(GetCustomeResourceDefenitionList(CustomResourceDefinitionList));
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-            res.status(500).send({
+            res.status(500).json({
                 listMeta: {
                     totalItems: 0
                 },
@@ -2526,19 +3953,34 @@ export class APIHandler {
             try{
                 if (!req.params || !req.params.crd){
 
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
 
                 } else {
 
-                    const CustomResourceDefinition_req: k8s.CustomObjectsApiGetClusterCustomObjectRequest = {group: 'apiextensions.k8s.io' ,version: 'v1', plural: 'customresourcedefinitions', name:req.params.crd}
-                    const CustomResourceDefinitionDetail = k8scustomObjectsApi.getClusterCustomObject(CustomResourceDefinition_req);
+                    const CustomResourceDefinition_req: k8s.ApiextensionsV1ApiReadCustomResourceDefinitionRequest = {name:req.params.crd}
+                    const CustomResourceDefinitionDetail = await k8sapiExtention.readCustomResourceDefinition(CustomResourceDefinition_req);
 
-                    res.status(200).json(await CustomResourceDefinitionDetail);
+                    res.status(200).json(GetCRDDetail(CustomResourceDefinitionDetail));
                 }
     
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -2546,10 +3988,20 @@ export class APIHandler {
         public static async handleGetCustomResourceObjectList(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.crd) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
 
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                  
                  } else {
                     const CustomResourceDefinition_req: k8s.CustomObjectsApiListNamespacedCustomObjectRequest = {group: 'apiextensions.k8s.io' ,version: 'v1',  namespace: req.params.namespace, plural: req.params.crd}; 
@@ -2559,18 +4011,43 @@ export class APIHandler {
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
-        // returns detailed information about custom resource object
+        /** returns detailed information about custom resource object
+         * 
+         * @param req.params.namespace namespace of the custom resource
+         * @param req.params.crd name of the CustomResourceDefinition
+         * @param req.params.object name of the custom resource object
+         * @param res 
+         */
         public static async handleGetCustomResourceObjectDetail(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.crd || !req.params.object) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
 
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                  
                  } else {
                     const CustomResourceDefinition_ObjecResource_req: k8s.CustomObjectsApiGetNamespacedCustomObjectRequest = {group: 'apiextensions.k8s.io' ,version: 'v1', namespace: req.params.namespace, plural: req.params.crd, name: req.params.object};
@@ -2580,7 +4057,16 @@ export class APIHandler {
                 }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -2588,10 +4074,20 @@ export class APIHandler {
         public static async handleGetCustomResourceObjectEvents(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.namespace || !req.params.crd || !req.params.object) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
 
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                  
                  } else {
                     const event_req: k8s.EventsV1ApiListNamespacedEventRequest = {namespace:req.params.namespace, fieldSelector: `involvedObject.name=${req.params.object},involvedObject.kind=${req.params.crd}` }
@@ -2601,37 +4097,246 @@ export class APIHandler {
                  }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
         // returns logs from a Container or returns logs from a Pod
-        public static async handleLogs(req: Request, res: Response):Promise<void> {
+        public static async handleLogs(req: Request, res: Response) {
             try{
-                if (!req.params || !req.params.namespace || !req.params.pod ) {
-                    res.status(400).send('Missing Or Misconfigured Params');
+
+                if (!req.params || !req.params.namespace || !req.params.podName || !req.params.container  ) {
+                    res.status(400).json(
+                        {
+                            errors: [{
+                                ErrStatus: Errstatus
+                            }]
+                        }
+                    );
 
                 }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                    res.status(404).send('Namespace does not exist')
+                    res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
                  
                  } else {
-                    let  PodLogs ;
-                    let PodLogs_req: k8s.CoreV1ApiReadNamespacedPodLogRequest;
-                    if (req.params.container) {
-                        PodLogs_req = {namespace: req.params.namespace, name: req.params.name, container: req.params.container}
-                        PodLogs = k8sApi.readNamespacedPodLog(PodLogs_req)
-                    } else {
-                    PodLogs_req = {namespace: req.params.namespace, name: req.params.name}
-                    PodLogs = k8sApi.readNamespacedPodLog(PodLogs_req)
-                    }
+                    res.setHeader('Content-Type', 'text/event-stream');
+                    res.setHeader('Cache-Control', 'no-cache');
+                    res.setHeader('Connection', 'keep-alive');
+                    const logStream = new stream.PassThrough();
 
-                    res.status(200).json(await PodLogs)
+
+                    logStream.on('data', (chunk) => {
+                        res.write(`data: ${chunk.toString()}\n\n`);
+                    })
+                    // k8s.LogsApi
+
+                    const request = await k8sLog.log(req.params.namespace, req.params.podName, req.params.container, logStream, {
+                        follow: true,
+                        // tailLines: Number(req.params.tailLines) || 10000,
+                        pretty: false,
+                        timestamps: false,
+                    });
+                    
+                    req.on('close', () => {
+                        request.abort();
+                        logStream.destroy();
+                    });
+
                  }
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         }
+
+        /** returns a text file with logs from a Container
+         * 
+         * @param req.params.container name of container in the Pod
+         * @param req.params.podName name of the Pod
+         * @param req.params.namespace namespace of the resource Optional
+         * @param res 
+         */
+        public static async handleLogFile(req: Request, res: Response):Promise<void> {
+            try{
+                if (!req.params || !req.params.namespace || !req.params.podName || !req.params.container ) {
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
+                }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
+                    res.status(404).json({
+                        errors: [{
+                            ErrStatus: ErrstatusNs
+                        }]
+                    })
+                 } else {
+                    let logBuffer: Buffer[] = [];
+                    const logStream = new stream.PassThrough();
+
+                    logStream.on('data', (chunk) => {
+                        logBuffer.push(chunk);
+                    });
+
+                    logStream.on('end', () => {
+                        const finalBuffer = Buffer.concat(logBuffer);
+                        res.setHeader('Content-Type', 'text/plain');
+                        res.setHeader('Content-Disposition', `attachment; filename="${req.params.podName}-${req.params.container}-logs.txt"`);
+                        res.status(200).send(finalBuffer);
+                    });
+
+                    await k8sLog.log(
+                        req.params.namespace,
+                        req.params.podName,
+                        req.params.container,
+                        logStream,
+                        {
+                            follow: false,
+                            pretty: false,
+                            timestamps: false,
+                        }
+                    );
+                }
+            } catch(err: any){
+                //console.log(`Error fetching Events ${err}`);
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+            }
+        }
+        
+        /** returns a text file with logs from a Container
+         * 
+         * @param req.params.resourceType type of the resource
+         * @param req.params.resourceName name of the resource
+         * @param req.params.namespace namespace of the resource Optional
+         * @param res 
+         */
+        public static async handleLogSource(req: Request, res: Response):Promise<void> {
+            try{
+                if (!req.params || !req.params.namespace || !req.params.resourceName || !req.params.resourceType ) {
+                    res.status(400).json(
+                        {
+                            errors: [{
+                                ErrStatus: Errstatus
+                            }]
+                        }
+                    );
+                }else if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
+                    res.status(404).json({
+                        errors: [{
+                            ErrStatus: ErrstatusNs
+                        }]
+                    })                 
+                 } else {
+                    switch (req.params.resourceType) {
+                        case 'CronJob':
+                            let CronJobList: k8s.V1CronJobList ;
+
+                            const CronJob_req: k8s.BatchV1ApiListNamespacedCronJobRequest = {namespace: req.params.namespace}
+                            CronJobList = await k8sbatchApi.listNamespacedCronJob(CronJob_req);
+                            res.status(200).json(GetCronJobLogList(CronJobList, req.params.resourceName))
+                            return
+                        case 'DaemonSet':
+                            let DaemonSetList: k8s.V1DaemonSetList ;
+
+                            const DaemonSet_req: k8s.AppsV1ApiListNamespacedDaemonSetRequest = {namespace: req.params.namespace}
+                            DaemonSetList = await k8sAppApi.listNamespacedDaemonSet(DaemonSet_req)
+                            res.status(200).json(GetDaemonSetLogList(DaemonSetList, req.params.resourceName))
+                            return
+                        case 'Deployment':
+                            let DeploymentList: k8s.V1DeploymentList ;
+                        
+                            const Deployment_req: k8s.AppsV1ApiListNamespacedDeploymentRequest = {namespace: req.params.namespace}
+                            DeploymentList = await k8sAppApi.listNamespacedDeployment(Deployment_req)
+                            res.status(200).json(GetDeploymentLogList(DeploymentList, req.params.resourceName))
+                            return
+
+                        case 'Job':
+                            let JobList: k8s.V1JobList ;
+                        
+                            const Job_req: k8s.BatchV1ApiListNamespacedJobRequest = {namespace: req.params.namespace}
+                            JobList = await k8sbatchApi.listNamespacedJob(Job_req);
+                            res.status(200).json(GetJobLogList(JobList, req.params.resourceName))
+                            return
+                        case 'Pod':
+                            let PodList: k8s.V1PodList ;
+                        
+                            const Pod_req: k8s.CoreV1ApiListNamespacedPodRequest = {namespace: req.params.namespace};
+                            PodList = await k8sApi.listNamespacedPod(Pod_req);
+                            res.status(200).json(GetPodLogList(PodList, req.params.resourceName))
+                            return
+                        case 'ReplicaSet':
+                            let ReplicaSetList: k8s.V1ReplicaSetList ;
+                        
+                            const ReplicaSet_req: k8s.AppsV1ApiListNamespacedReplicaSetRequest = {namespace: req.params.namespace}
+                            ReplicaSetList = await k8sAppApi.listNamespacedReplicaSet(ReplicaSet_req)
+                            res.status(200).json(GetReplicaSetLogList(ReplicaSetList, req.params.resourceName))
+                            return
+                        case 'ReplicationController':
+                            let ReplicationControllerList: k8s.V1ReplicationControllerList ;
+                        
+                            const ReplicationController_req: k8s.CoreV1ApiListNamespacedReplicationControllerRequest = {namespace: req.params.namespace}
+                            ReplicationControllerList = await k8sApi.listNamespacedReplicationController(ReplicationController_req)
+                            res.status(200).json(GetReplicationControllerLogList(ReplicationControllerList, req.params.resourceName))
+                            return
+                        case 'StatefulSet':
+                            let StatefulSetList: k8s.V1StatefulSetList ;
+                        
+                            const StatefulSet_req: k8s.AppsV1ApiListNamespacedStatefulSetRequest = {namespace: req.params.namespace}
+                            StatefulSetList = await k8sAppApi.listNamespacedStatefulSet(StatefulSet_req)
+                            res.status(200).json(GetStatefulSetLogList(StatefulSetList, req.params.resourceName))
+                            return
+                        default :
+                            break; 
+                    }
+                       
+                 }
+            } catch(err: any){
+                //console.log(`Error fetching Events ${err}`);
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+            }
+        }
+
 
         /** returns a number of replicas of non-namespaced or namespaced resource
          * 
@@ -2643,8 +4348,13 @@ export class APIHandler {
         public static async handleGetReplicaCount(req: Request, res: Response):Promise<void> {
             try{
                 if (!req.params || !req.params.kind ) {
-                    res.status(400).send('Missing Or Misconfigured Params');
-
+                    res.status(400).json(
+                        {
+                            errors: [{
+                                ErrStatus: Errstatus
+                            }]
+                        }
+                    );
                 } else {                 
                     let plural: string = '';
 
@@ -2666,11 +4376,15 @@ export class APIHandler {
 
                         if (req.params.namespace) {
                             if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
-                                res.status(404).send('Namespace does not exist')
+                                res.status(404).json({
+                                    errors: [{
+                                        ErrStatus: ErrstatusNs
+                                    }]
+                                })
                                 return                 
                             }
                             const CustomObj_req: k8s.CustomObjectsApiGetNamespacedCustomObjectRequest = {namespace: req.params.namespace, name: req.params.name, plural: plural, group: group, version: version }
-                            CustomObj= k8scustomObjectsApi.getNamespacedCustomObject(CustomObj_req)
+                            CustomObj = k8scustomObjectsApi.getNamespacedCustomObject(CustomObj_req)
 
                         } else {
                             const CustomObj_req: k8s.CustomObjectsApiGetClusterCustomObjectRequest = {name: req.params.name, group: group, version: version, plural: plural}
@@ -2686,7 +4400,91 @@ export class APIHandler {
                  } 
             } catch(err: any){
                 //console.log(`Error fetching Events ${err}`);
-                res.status(500).send({error: err.message || 'Internal Server Error'});
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+            }
+        } 
+
+                /** returns a number of replicas of non-namespaced or namespaced resource
+         * 
+         * @param req.params.kind kind of the resource
+         * @param req.params.name name of the resource
+         * @param req.params.namespace namespace of the resource Optional
+         * @param res 
+         */
+        public static async handleScaleResource(req: Request, res: Response):Promise<void> {
+            try{
+                if (!req.params || !req.params.kind ) {
+                    res.status(400).json(
+                        {
+                            errors: [{
+                                ErrStatus: Errstatus
+                            }]
+                        }
+                    );
+                } else {                 
+                    let plural: string = '';
+
+                    if (req.params.kind.endsWith("y") && !req.params.kind.endsWith("ay") && !req.params.kind.endsWith("ey") && !req.params.kind.endsWith("iy") && !req.params.kind.endsWith("oy") && !req.params.kind.endsWith("uy")) {
+                        // Convert 'y' to 'ies' (e.g., Policy → Policies)
+                        plural =  req.params.kind.slice(0, -1) + "ies";
+                    } else if (req.params.kind.endsWith("s") || req.params.kind.endsWith("x") || req.params.kind.endsWith("z") || req.params.kind.endsWith("sh") || req.params.kind.endsWith("ch")) {
+                        // Add 'es' for words ending with s, x, z, sh, ch (e.g., Ingress → Ingresses)
+                        plural =  req.params.kind + "es";
+                    } else {
+                        plural =  req.params.kind + "s";
+                    }
+
+                    // const resource = await getGroupAndVersion(req.params.kind, req.params.name)
+
+                    // if (resource) {
+                    //     const {group, version} = resource
+                    //     let CustomObj: any;
+
+                    //     if (req.params.namespace) {
+                    //         if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
+                    //             res.status(404).json({
+                    //                 errors: [{
+                    //                     ErrStatus: ErrstatusNs
+                    //                 }]
+                    //             })
+                    //             return                 
+                    //         }
+                    //         const CustomObj_req: k8s.CustomObjectsApiGetNamespacedCustomObjectRequest = {namespace: req.params.namespace, name: req.params.name, plural: plural, group: group, version: version }
+                    //         CustomObj = k8scustomObjectsApi.getNamespacedCustomObject(CustomObj_req)
+
+                    //     } else {
+                    //         const CustomObj_req: k8s.CustomObjectsApiGetClusterCustomObjectRequest = {name: req.params.name, group: group, version: version, plural: plural}
+                    //         CustomObj= k8scustomObjectsApi.getClusterCustomObject(CustomObj_req)
+                    //     }
+                    //     const Replicas: number = CustomObj.status?.replicas || CustomObj.spec?.replicas || 0
+
+                    //     res.status(200).json({Replicas ,CustomObj}) // After testing just remove or fix the Replicas
+                    // } else {
+                        res.status(404).send('Not implemented ')
+                    // }
+
+                 } 
+            } catch(err: any){
+                //console.log(`Error fetching Events ${err}`);
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
             }
         } 
 
@@ -2695,7 +4493,16 @@ export class APIHandler {
     
         //     } catch(err: any){
         //         //console.log(`Error fetching Events ${err}`);
-        //         res.status(500).send({error: err.message || 'Internal Server Error'});
+        //                         res.status(500).json({
+                //     errors: [{
+                //         ErrStatus:{
+                //             message: err.message,
+                //             code: 500,
+                //             status: 'Internal Server Error',
+                //             reason: ''
+                //         }
+                //     }]
+                // });
         //     }
         // } 
 
@@ -2705,8 +4512,17 @@ export class APIHandler {
     
         //     } catch(err: any){
         //         //console.log(`Error fetching Events ${err}`);
-        //         res.status(500).send({error: err.message || 'Internal Server Error'});
-        //     }
+        //                         res.status(500).json({
+        //             errors: [{
+        //                 ErrStatus:{
+        //                     message: err.message,
+        //                     code: 500,
+        //                     status: 'Internal Server Error',
+        //                     reason: ''
+        //                 }
+        //             }]
+        //         });
+        // //     }
         // } 
 
 
@@ -2715,21 +4531,559 @@ export class APIHandler {
     
         //     } catch(err: any){
         //         //console.log(`Error fetching Events ${err}`);
-        //         res.status(500).send({error: err.message || 'Internal Server Error'});
+        //                         res.status(500).json({
+                //     errors: [{
+                //         ErrStatus:{
+                //             message: err.message,
+                //             code: 500,
+                //             status: 'Internal Server Error',
+                //             reason: ''
+                //         }
+                //     }]
+                // });
         //     }
         // } 
 
-    public static async  handleGetScrap(req: Request, res: Response): Promise<void> {
-                try {
+        public static async  handleGetScrap(req: Request, res: Response): Promise<void> {
+            try {
+                
+                res.status(200).json(await ScrapData(req.params.namespace));
+            } catch(err: any) {
+                //console.log(`Error retreving namespaces ${err}`);
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+            } 
         
-                    res.status(200).json(await ScrapData(req.params.namespace));
-                } catch(err: any) {
-                    //console.log(`Error retreving namespaces ${err}`);
-                    res.status(500).send({error: err.message || 'Internal Server Error'})
+        }
+
+
+        // App Deployment
+
+        /** creates an application based on provided deployment.AppDeploymentSpec
+         * 
+         */
+
+        public static async handleDeploy(req: Request, res: Response): Promise<void> {
+            try {
+                
+                res.status(200).send('Not Implemented ');
+            } catch(err: any) {
+                //console.log(`Error retreving namespaces ${err}`);
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+            } 
+        
+        }
+
+        /** checks if provided name is valid
+         * 
+         */
+
+        public static async  handleNameValidity(req: Request, res: Response): Promise<void> {
+            try {
+                
+                res.status(200).send('Not Implemented ');
+            } catch(err: any) {
+                //console.log(`Error retreving namespaces ${err}`);
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+            } 
+        
+        }
+
+        /** checks if provided image is valid
+         * 
+         */
+
+        public static async  handleImageReferenceValidity(req: Request, res: Response): Promise<void> {
+            try {
+                
+                res.status(200).send('Not Implemented ');
+            } catch(err: any) {
+                //console.log(`Error retreving namespaces ${err}`);
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+            } 
+        
+        }
+
+
+        /** checks if provided service protocol is valid
+         * 
+         */
+
+        public static async  handleProtocolValidity(req: Request, res: Response): Promise<void> {
+            try {
+                
+                res.status(200).send('Not Implemented ');
+            } catch(err: any) {
+                //console.log(`Error retreving namespaces ${err}`);
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+            } 
+        
+        }
+
+        /** returns a list of available protocols for the service
+         * 
+         */
+
+        public static async  handleGetAvailableProtocols(req: Request, res: Response): Promise<void> {
+            try {
+                
+                res.status(200).send('Not Implemented ');
+            } catch(err: any) {
+                //console.log(`Error retreving namespaces ${err}`);
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+            } 
+        
+        }
+
+        /** create an application from file
+         * 
+         */
+
+        // public static async  handleDeployFromFile(req: Request, res: Response): Promise<void> {
+        //     try {
+                
+        //         res.status(200).send('Not Implemented ');
+        //     } catch(err: any) {
+        //         //console.log(`Error retreving namespaces ${err}`);
+        //                         res.status(500).json({
+                //     errors: [{
+                //         ErrStatus:{
+                //             message: err.message,
+                //             code: 500,
+                //             status: 'Internal Server Error',
+                //             reason: ''
+                //         }
+                //     }]
+                // });
+        //     } 
+        
+        // }
+
+        /** Replicate the functionality of `kubectl apply`.  That is, create the resources defined in the `specFile` if they do
+         * not exist, patch them if they do exist.
+         * @param req.body.specFile File systempath to a YAML kubernetes spec.
+         * @param res Array of resources Created
+         * 
+         */
+        public static async  handleDeployFromFile(req: Request, res: Response): Promise<void> {
+            try {
+
+                const appDeploymentContentSpec: AppDeploymentContentSpec = req.body;
+                const response: AppDeploymentContentResponse = {contet: '', error: '', name: ''};
+                if (!appDeploymentContentSpec) {
+                  response.error = "We couldn't read the content"
+                  res.status(400).json(response);
+                  return;
                 }
+
+                console.log(appDeploymentContentSpec)
+                // const specString = await fs.readFile(filePath, 'utf8');
+                const spec: k8s.KubernetesObject[] = yaml.loadAll(appDeploymentContentSpec.content) as k8s.KubernetesObject[];
+                const validSpecs = spec.filter((s) => s && s.kind && s.metadata);
+                const created: k8s.KubernetesObject[] = [];
+
+                for(const spec of validSpecs) {
+                    // this is to convince the old version of TypeScript that metadata exists even though we already filtered specs
+                    // without metadata out
+                    spec.metadata = spec.metadata || {}
+                    spec.metadata.annotations = spec.metadata.annotations || {};
+                    spec.metadata.annotations['kubectl.kubernetes.io/last-applied-configuration'] = JSON.stringify(spec);
+                    try {
+                        // trying to get the resource
+                        await k8sclient.read(spec as k8s.KubernetesObject & { metadata: { name: string, namespace?: string } });
+
+                        /* Here i tryed to patch a resource if exists and this could caus a security issue 
+                         espacialy when working on the same target but they need to know the kind and the name for the resource
+                         and if he did he can change it suposing as creating it we can remove it but i add for the case where
+                         the user send the file or the content and no message appear to him and he did the request onther time !
+                        */
+                        
+                        const response = await k8sclient.patch(spec);
+                        created.push(response)
+                    }catch(err: any) {
+                        // if the resource doesnt exist then create it
+                        if (err instanceof k8s.ApiException && err.code === 404) {
+                            const response = await k8sclient.create(spec);
+                            created.push(response);
+                        } else {
+                            response.error = 'Internal Server Error'
+                            res.status(500).send(response)
+                            return
+                        }
+                    } 
+                }
+                response.name = appDeploymentContentSpec.name
+                response.contet = 'Created Succusfully'
+
+                res.status(200).json(response);
+            } catch(err: any) {
+                //console.log(`Error retreving namespaces ${err}`);
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+            } 
+        }
         
-            }
-}
+        
+        /** returns unstructured resource from a namespace
+         * @param req.params.kind kind of the resource.
+         * @param req.params.namespace namespace of the resource.
+         * @param req.params.name name of the resource.
+         * @param res 
+         * 
+         */
+        public static async  handleEditResource(req: Request, res: Response): Promise<void> {
+            try {
+                if (!req.params || !req.params.name || !req.params.kind ) {
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
+                }else {
+                    if(req.params.namespace) {
+                        if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
+                            res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
+                            return
+                        } 
+
+                    }else{
+
+                        res.status(200).send('Not Implemented');
+
+                    }
+                 }
+            } catch(err: any) {
+                //console.log(`Error retreving namespaces ${err}`);
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+            } 
+        }
+
+        /** creates or updates a resource in a namespace
+         * @param req.params.kind kind of the resource.
+         * @param req.params.namespace namespace of the resource.
+         * @param req.params.name name of the resource.
+         * @param req.body JSON resource Object.
+         * @param res 
+         * 
+         */
+        public static async  handlePutResource(req: Request, res: Response): Promise<void> {
+            try {
+                if (!req.params || !req.params.name || !req.params.kind || !req.body ) {
+                    res.status(400).send('Missing Or Misconfigured Request');
+                }else {
+                    let resourceObject;
+                    const apiVersion = req.query.apiVersion;
+                    let resourceObjectReq: k8s.KubernetesObject = req.body
+
+                    if(req.params.namespace) {
+                        if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
+                            res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
+                            return
+                        }
+
+                        resourceObject = {apiVersion: apiVersion ,kind: req.params.kind, metadata: {
+                            name: req.params.name,
+                            namespace: req.params.namespace,
+                        }}
+
+                    }else{
+                        resourceObject = {apiVersion: apiVersion,kind: req.params.kind, metadata: {
+                            name: req.params.name,
+                        }}
+                        
+                    }
+
+                    if ((await k8sclient.read(resourceObject)).metadata?.name){
+                        await k8sclient.replace(resourceObjectReq) ? res.status(200).send(`The ${req.params.name} Resource Updated `) : res.status(200).send(`We are Not able to Update ${req.params.name} Resource`)
+                    }
+                }
+
+            } catch(err: any) {
+                //console.log(`Error retreving namespaces ${err}`);
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+            } 
+        }
+
+        /** deletes a resource from a namespace
+         * @param req.params.kind kind of the resource.
+         * @param req.params.namespace namespace of the resource.
+         * @param req.params.name name of the resource.
+         * @param req.params.deleteNow override graceful delete options and enforce immediate deletion.
+         * @param req.params.propagation override default delete propagation policy.
+         * @param res 
+         * 
+         */
+        public static async  handleDeleteResource(req: Request, res: Response): Promise<void> {
+            try {
+                if (!req.params || !req.params.name || !req.params.kind ) {
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
+                }else {
+                    let resourceObject: k8s.KubernetesObject ;
+                    const apiVersion: string = String(req.query.apiVersion);
+                    const deleteNow = req.query.deleteNow;
+
+                    if(req.params.namespace) {
+                        if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
+                            res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
+                            return
+                        }
+                        if(deleteNow === 'false'){
+                            resourceObject = {apiVersion: apiVersion ,  kind: req.params.kind, metadata: {
+                                name: req.params.name,
+                                namespace: req.params.namespace,
+                                deletionGracePeriodSeconds: 30,
+                                deletionTimestamp: new Date(formatRFC3339(new Date()))
+                            }}
+                        }else {
+                            resourceObject = {apiVersion: apiVersion, kind: req.params.kind, metadata: {
+                                name: req.params.name,
+                                namespace: req.params.namespace,
+                            }}
+                        }
+
+                    }else{
+                        if(req.params.deleteNow){
+                            resourceObject = {apiVersion: apiVersion, kind: req.params.kind, metadata: {
+                                name: req.params.name,
+                                deletionGracePeriodSeconds: Number(req.params.deleteNow),
+                                deletionTimestamp: new Date(formatRFC3339(new Date()))
+                            }}
+                        }else {
+                            resourceObject = {apiVersion: apiVersion, kind: req.params.kind, metadata: {
+                                name: req.params.name,
+                            }}
+                        }
+                    }
+
+                    res.status(200).send((await k8sclient.delete(resourceObject)).status + `Delete the ${req.params.name} Resource`);
+                 }
+                
+            } catch(err: any) {
+                //console.log(`Error retreving namespaces ${err}`);
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+            } 
+        }
+
+        /** returns unstructured resource from a namespace
+         * @param req.params.kind kind of the resource.
+         * @param req.params.apiVersion apiVersion of the resource
+         * @param req.params.namespace namespace of the resource.
+         * @param req.params.name name of the resource.
+         * @param res 
+         * 
+         */
+        public static async  handleGetResource(req: Request, res: Response) {
+            try {
+                if (!req.params || !req.params.name || !req.params.kind ) {
+                                    res.status(400).json(
+                    {
+                        errors: [{
+                            ErrStatus: Errstatus
+                        }]
+                    }
+                );
+                }else {
+                    let resourceObject;
+                    const apiVersion = req.query.apiVersion;
+                    if(req.params.namespace) {
+                        if (!await k8sApi.readNamespaceStatus({name: req.params.namespace})){
+                            res.status(404).json({
+                    errors: [{
+                        ErrStatus: ErrstatusNs
+                    }]
+                })
+                            return
+                        }
+
+                        resourceObject = {apiVersion: apiVersion, kind: req.params.kind, metadata: {
+                            name: req.params.name,
+                            namespace: req.params.namespace,
+                        }}
+
+                    }else{
+                        resourceObject = {apiVersion: apiVersion, kind: req.params.kind, metadata: {
+                            name: req.params.name,
+                        }}
+                        
+                    }
+                    const objectResource = await k8sclient.read(resourceObject)
+                    res.status(200).json(objectResource);
+                }
+
+            } catch(err: any) {
+                console.log(`Error retreving namespaces ${err}`);
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+            } 
+        }
+
+        /** Replicate the functionality of `kubectl apply`.  That is, create the resources defined in the `specFile` if they do
+         * not exist, patch them if they do exist.
+         * @param req.body.specFile File systempath to a YAML kubernetes spec.
+         * @param res Array of resources Created
+         * 
+         */
+        public static async  handleScaleDeployment(req: Request, res: Response): Promise<void> {
+            try {
+                const name = req.params.name
+                const namespace = req.params.namespace
+                const replicas = Number(req.params.replicas)
+                
+                // find the particular deployment
+                const deployment : k8s.V1Deployment = await k8sAppApi.readNamespacedDeployment({
+                    name,
+                    namespace,
+                });
+                
+                // edit
+                const newDeployment : k8s.V1Deployment = {
+                    ...deployment,
+                    spec: {
+                        ...deployment.spec!,
+                        replicas,
+                    },
+                };
+
+                // replace
+                await k8sAppApi.replaceNamespacedDeployment({
+                    name,
+                    namespace,
+                    body: newDeployment ,
+                });
+                k8s.topNodes
+
+                res.status(200).send("Success Scaling Deployment")
+            } catch(err: any) {
+                //console.log(`Error retreving namespaces ${err}`);
+                                res.status(500).json({
+                    errors: [{
+                        ErrStatus:{
+                            message: err.message,
+                            code: 500,
+                            status: 'Internal Server Error',
+                            reason: ''
+                        }
+                    }]
+                });
+            } 
+        }
+    }
 
 
 

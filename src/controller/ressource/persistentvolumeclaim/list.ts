@@ -26,7 +26,8 @@ export function GetPersistentVolumeClaimList(listNamespacedPersistentVolumeClaim
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedPersistentVolumeClaim.kind || '',
+                apiVersion: item.apiVersion || 'v1',
+                kind: item.kind ||'PersistentVolumeClaim',
                 scalable: false,
                 restartable: false,
             }

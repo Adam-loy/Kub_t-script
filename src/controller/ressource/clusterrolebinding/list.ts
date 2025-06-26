@@ -23,7 +23,8 @@ export function GetClusterRoleBindingList(listNamespacedClusterRoleBinding: k8s.
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedClusterRoleBinding.kind || '',
+                apiVersion: item.apiVersion || 'rbac.authorization.k8s.io/v1',
+                kind:  item.kind || 'ClusterRoleBinding',
                 scalable: false,
                 restartable: false,
             }

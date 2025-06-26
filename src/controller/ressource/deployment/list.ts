@@ -44,9 +44,10 @@ export function GetDeploymentList(listNamespacedDeployment: k8s.V1DeploymentList
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedDeployment.kind || '',
-                scalable: false,
-                restartable: false,
+                apiVersion: item.apiVersion || 'apps/v1',
+                kind: item.kind || 'Deployment',
+                scalable: true,
+                restartable: true,
             }
         })
         

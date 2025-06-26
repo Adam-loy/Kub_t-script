@@ -43,9 +43,10 @@ export function GetReplicationControllerList(listNamespacedReplicationController
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedReplicationController.kind || '',
-                scalable: false,
-                restartable: false,
+                apiVersion: item.apiVersion || 'v1',
+                kind:  item.kind || 'ReplicationController',
+                scalable: true,
+                restartable: true,
             }
         })
 

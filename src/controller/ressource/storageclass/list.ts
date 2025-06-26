@@ -24,7 +24,8 @@ export function GetStorageClassList(listNamespacedStorageClass: k8s.V1StorageCla
                 ownerReferences: item.metadata?.ownerReferences,
             },
             typeMeta: {
-                kind: listNamespacedStorageClass.kind || '',
+                apiVersion: item.apiVersion || 'storage.k8s.io/v1',
+                kind: item.kind || 'StorageClass',
                 scalable: false,
                 restartable: false,
             }
